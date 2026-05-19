@@ -91,3 +91,39 @@ def run_command(
         )
 
     return result
+
+
+def run_readonly(
+    command: CommandInput,
+    *,
+    cwd: Optional[str] = None,
+    env: Optional[Mapping[str, str]] = None,
+    timeout: Optional[float] = None,
+) -> CommandResult:
+    """Execute a read-only diagnostic command (always live, logged)."""
+    argv = _normalize_argv(command)
+    display = " ".join(shlex.quote(arg) for arg in argv)
+    logger.info("readonly execute: %s", display)
+
+    completed = subprocess.run(
+        argv,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env=dict(env) if env is not None else None,
+        timeout=timeout,
+        check=False,
+    )
+
+    if completed.stdout:
+        logger.debug("stdout: %s", completed.stdout.rstrip())
+    if completed.stderr:
+        logger.debug("stderr: %s", completed.stderr.rstrip())
+
+    return CommandResult(
+        argv=argv,
+        returncode=completed.returncode,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
+        dry_run=False,
+    )
