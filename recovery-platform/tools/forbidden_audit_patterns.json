@@ -1,0 +1,50 @@
+{
+  "exclude_dir_names": [
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    ".venv",
+    "venv"
+  ],
+  "whitelist_exact_rel_paths": [
+    "tools/run_integration_checks.py",
+    "tools/safety_audit.py",
+    "tools/code_policy_audit.py",
+    "tools/destructive_command_audit.py",
+    "tools/forbidden_audit_patterns.json"
+  ],
+  "whitelist_relative_path_prefixes": [
+    "tests/",
+    "docs/",
+    "tools/forbidden_audit_patterns.json",
+    "diagnostics/",
+    "release/dist"
+  ],
+  "patterns_fail_in_code": [
+    {
+      "id": "disk0_word",
+      "regex": "(?i)\\bDisk0\\b|\\bDisk\\s*0\\b",
+      "label": "Disk0 / Disk 0 하드코딩"
+    },
+    {
+      "id": "partition1_word",
+      "regex": "(?i)\\bPartition1\\b|\\bPartition\\s*1\\b",
+      "label": "Partition1 하드코딩"
+    },
+    {
+      "id": "boot0000",
+      "regex": "\\bBoot0000\\b",
+      "label": "Boot0000 하드코딩"
+    },
+    {
+      "id": "dev_sda",
+      "regex": "(?:^|\\W)/dev/sda\\b",
+      "label": "/dev/sda 고정"
+    },
+    {
+      "id": "dev_nvme0n1",
+      "regex": "(?:^|\\W)/dev/nvme0n1\\b",
+      "label": "/dev/nvme0n1 고정"
+    }
+  ]
+}

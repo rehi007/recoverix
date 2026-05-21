@@ -17,3 +17,15 @@ class ConfirmationRequiredError(RecoveryError):
 
 class BitLockerActiveError(RecoveryError):
     """Raised when BitLocker is ON and the requested operation must be refused."""
+
+
+class RestoreEnvironmentError(RecoveryError):
+    """Raised when restore is attempted outside the recovery runtime."""
+
+
+class InvalidConfirmationPhraseError(RecoveryError):
+    """Raised when the restore confirmation phrase does not match."""
+
+
+class RestoreSafetyError(RecoveryError):
+    """Raised when restore safety checks fail before execution."""

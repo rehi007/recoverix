@@ -1,0 +1,3 @@
+2026-05-20 16:13:05,612 | INFO | windows_agent.repair | bcdedit: bcdedit /set {fwbootmgr} displayorder {recovery-boot-id} {aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}
+2026-05-20 16:13:05,615 | ERROR | windows_agent.fix_bootorder_task | administrator privileges required
+2026-05-20 16:13:05,616 | ERROR | windows_agent.fix_bootorder_task | fix_bootorder_task requires Windows
