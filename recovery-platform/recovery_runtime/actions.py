@@ -142,8 +142,17 @@ def run_backup_action(
             print(f"사유: {plan.reason}")
         if dry_plan.estimated_required_bytes:
             print(
-                f"예상 backup 크기: {format_bytes(dry_plan.estimated_required_bytes)}"
+                f"예상 backup 크기: {format_bytes(dry_plan.estimated_required_bytes)} "
+                f"({dry_plan.estimated_required_gb} GiB planned)"
             )
+        if dry_plan.estimation_method:
+            print(f"용량 추정 방식: {dry_plan.estimation_method}")
+        if dry_plan.estimated_used_bytes:
+            print(f"Windows 사용량(추정): {format_bytes(dry_plan.estimated_used_bytes)}")
+        if dry_plan.estimation_warning:
+            print(f"용량 추정 경고: {dry_plan.estimation_warning}")
+        if dry_plan.reason and dry_plan.estimation_method == "partition_size_fallback":
+            print(f"추정 사유: {dry_plan.reason}")
         if ctx.recovery_image_partition and ctx.recovery_image_partition.size:
             print(
                 f"Recovery Image 크기: {format_bytes(ctx.recovery_image_partition.size)}"

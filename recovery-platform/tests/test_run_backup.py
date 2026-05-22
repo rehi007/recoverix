@@ -14,8 +14,20 @@ from backup_engine.run_backup import (
     plan_backup_run,
     run_backup,
 )
+from backup_engine.space_estimation import BackupSizeEstimate
 from backup_engine.write_guard import WriteGuard, WriteForbiddenError
 from recovery_runtime.discover import DiscoveredVolume
+
+
+def _mock_estimate_ok() -> BackupSizeEstimate:
+    return BackupSizeEstimate(
+        estimated_used_bytes=49 * 1024**3,
+        estimated_required_bytes=50 * 1024**3,
+        estimated_required_gb=50.0,
+        estimation_method="ntfs_used_space",
+        recovery_image_free_bytes=500 * 1024**3,
+        can_backup=True,
+    )
 
 
 def _layout(mount: str | None = "/mnt/recovery") -> _DiscoveredLayout:
@@ -52,10 +64,11 @@ def _layout(mount: str | None = "/mnt/recovery") -> _DiscoveredLayout:
     )
 
 
+@patch.object(run_backup_mod, "estimate_backup_space")
 @patch.object(run_backup_mod, "read_bitlocker_state", return_value="OFF")
 @patch.object(run_backup_mod, "discover_layout")
 @patch.object(run_backup_mod, "build_disk_metadata")
-def test_dry_run_planned_output(mock_disk, mock_discover, _mock_bl):
+def test_dry_run_planned_output(mock_disk, mock_discover, _mock_bl, mock_estimate):
     mock_discover.return_value = (None, _layout())
     mock_disk.return_value = MagicMock(
         disk_guid="{disk}",
@@ -65,6 +78,7 @@ def test_dry_run_planned_output(mock_disk, mock_discover, _mock_bl):
         windows_partition_uuid="{w}",
         efi_partition_uuid="{e}",
     )
+    mock_estimate.return_value = _mock_estimate_ok()
 
     result = plan_backup_run(WriteGuard(apply=False, confirmed=False))
     assert result.status == "PLANNED"
@@ -75,6 +89,8 @@ def test_dry_run_planned_output(mock_disk, mock_discover, _mock_bl):
     assert "gpt_backup" in result.planned_commands
     assert result.expected_manifest["sha256_hashes"]
     assert result.estimated_required_bytes > 0
+    assert result.estimation_method == "ntfs_used_space"
+    assert result.estimated_used_bytes == 49 * 1024**3
 
 
 @patch.object(run_backup_mod, "read_bitlocker_state", return_value="ON")
@@ -102,11 +118,12 @@ def test_dry_run_cli_success():
     assert code == 0
 
 
+@patch.object(run_backup_mod, "estimate_backup_space", return_value=_mock_estimate_ok())
 @patch.object(run_backup_mod, "run_command")
 @patch.object(run_backup_mod, "discover_layout")
 @patch.object(run_backup_mod, "read_bitlocker_state", return_value="OFF")
 @patch.object(run_backup_mod, "build_disk_metadata")
-def test_dry_run_no_command_execution(mock_disk, _mock_bl, mock_discover, mock_cmd):
+def test_dry_run_no_command_execution(mock_disk, _mock_bl, mock_discover, mock_cmd, _mock_est):
     mock_discover.return_value = (None, _layout())
     mock_disk.return_value = MagicMock(
         disk_guid="{disk}",
@@ -139,6 +156,7 @@ def test_write_guard_apply_requires_confirm():
 
 
 @patch.object(WriteGuard, "mkdir")
+@patch.object(run_backup_mod, "estimate_backup_space", return_value=_mock_estimate_ok())
 @patch.object(run_backup_mod, "run_command")
 @patch.object(run_backup_mod, "finalize_backup_manifest")
 @patch.object(run_backup_mod, "_resolve_recovery_mount")
@@ -155,6 +173,7 @@ def test_apply_executes_with_confirm(
     mock_finalize,
     mock_cmd,
     _mock_mkdir,
+    _mock_est,
 ):
     mock_discover.return_value = (None, _layout("/mnt/recovery"))
     mock_mount.return_value = (Path("/mnt/recovery"), ["use existing mount"])
@@ -175,15 +194,24 @@ def test_apply_executes_with_confirm(
     mock_finalize.assert_called_once()
 
 
-def test_estimate_required_bytes():
+@patch("backup_engine.space_estimation.estimate_ntfs_used_bytes")
+@patch("backup_engine.space_estimation.estimate_efi_backup_bytes", return_value=512 * 1024**2)
+@patch(
+    "backup_engine.space_estimation.estimate_recovery_image_free_bytes",
+    return_value=500 * 1024**3,
+)
+def test_estimate_required_bytes_uses_used_space(mock_free, mock_efi, mock_ntfs):
+    mock_ntfs.return_value = (49 * 1024**3, "ntfs_used_space", None, {"probes": []})
     required = estimate_required_bytes(_layout())
-    assert required > 80 * 1024**3
+    assert required < 80 * 1024**3
+    assert required > 49 * 1024**3
 
 
+@patch.object(run_backup_mod, "estimate_backup_space", return_value=_mock_estimate_ok())
 @patch.object(run_backup_mod, "read_bitlocker_state", return_value="OFF")
 @patch.object(run_backup_mod, "discover_layout")
 @patch.object(run_backup_mod, "build_disk_metadata")
-def test_dry_run_no_filesystem_writes(mock_disk, mock_discover, _mock_bl):
+def test_dry_run_no_filesystem_writes(mock_disk, mock_discover, _mock_bl, _mock_est):
     mock_discover.return_value = (None, _layout())
     mock_disk.return_value = MagicMock(
         disk_guid="{disk}",

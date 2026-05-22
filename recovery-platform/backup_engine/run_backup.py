@@ -35,6 +35,12 @@ from backup_engine.partclone_wrapper import (
     format_partclone_fat_command,
     format_partclone_ntfs_command,
 )
+from backup_engine.space_estimation import (
+    GPT_OVERHEAD_BYTES,
+    BackupSizeEstimate,
+    estimate_backup_space,
+    estimate_required_bytes,
+)
 from backup_engine.write_guard import WriteGuard, WriteForbiddenError
 from common.command import run_command, run_readonly
 from common.errors import ConfirmationRequiredError
@@ -43,9 +49,6 @@ from recovery_runtime.discover import require_linux
 from recovery_runtime.mounts import mount_point_for_label, plan_mount
 
 logger = get_logger(__name__)
-
-GPT_OVERHEAD_BYTES = 1024 * 1024
-
 
 @dataclass(frozen=True)
 class BackupRunResult:
@@ -61,6 +64,11 @@ class BackupRunResult:
     expected_image_paths: Dict[str, str] = field(default_factory=dict)
     estimated_required_bytes: int = 0
     estimated_required_gb: float = 0.0
+    estimated_used_bytes: int = 0
+    estimation_method: str = ""
+    estimation_warning: Optional[str] = None
+    recovery_image_free_bytes: Optional[int] = None
+    estimation_details: Dict[str, Any] = field(default_factory=dict)
     planned_commands: Dict[str, str] = field(default_factory=dict)
     expected_manifest: Dict[str, Any] = field(default_factory=dict)
     planned_operations: List[str] = field(default_factory=list)
@@ -107,12 +115,47 @@ def _format_uuid(value: Optional[str], device: str) -> str:
     return value if value.startswith("{") else f"{{{value}}}"
 
 
-def estimate_required_bytes(layout) -> int:
-    total = GPT_OVERHEAD_BYTES
-    for vol in (layout.efi, layout.windows):
-        if vol.size:
-            total += int(vol.size)
-    return total
+def _result_from_estimate(
+    estimate: BackupSizeEstimate,
+    *,
+    base: BackupRunResult,
+) -> BackupRunResult:
+    """Merge space estimate into an existing result; block backup if space insufficient."""
+    can_backup = base.can_backup and estimate.can_backup
+    reason = base.reason
+    if estimate.estimation_warning and estimate.estimation_method == "partition_size_fallback":
+        reason = (
+            estimate.estimation_warning
+            if not reason
+            else f"{reason}; {estimate.estimation_warning}"
+        )
+    elif estimate.reason and not reason:
+        reason = estimate.reason
+    status = base.status
+    if base.can_backup and not estimate.can_backup:
+        reason = estimate.reason or "insufficient recovery image space"
+        if status == "PLANNED":
+            status = "REJECTED"
+    return BackupRunResult(
+        status=status,
+        dry_run=base.dry_run,
+        apply=base.apply,
+        confirmed=base.confirmed,
+        can_backup=can_backup,
+        reason=reason,
+        backup_targets=base.backup_targets,
+        expected_image_paths=base.expected_image_paths,
+        estimated_required_bytes=estimate.estimated_required_bytes,
+        estimated_required_gb=estimate.estimated_required_gb,
+        estimated_used_bytes=estimate.estimated_used_bytes,
+        estimation_method=estimate.estimation_method,
+        estimation_warning=estimate.estimation_warning,
+        recovery_image_free_bytes=estimate.recovery_image_free_bytes,
+        estimation_details=estimate.estimation_details,
+        planned_commands=base.planned_commands,
+        expected_manifest=base.expected_manifest,
+        planned_operations=base.planned_operations,
+    )
 
 
 def build_expected_manifest(
@@ -197,7 +240,14 @@ def plan_backup_run(guard: WriteGuard) -> BackupRunResult:
         else mount_point_for_label("RECOVERY_IMAGE")
     )
     disk = build_disk_metadata(layout)
-    required_bytes = estimate_required_bytes(layout)
+    estimate = estimate_backup_space(layout)
+    logger.info(
+        "backup dry-run space: method=%s used=%s required_gb=%s warning=%s",
+        estimate.estimation_method,
+        estimate.estimated_used_bytes,
+        estimate.estimated_required_gb,
+        estimate.estimation_warning,
+    )
 
     image_paths = {
         "gpt": str(recovery_mount / GPT_METADATA_RELATIVE),
@@ -233,10 +283,19 @@ def plan_backup_run(guard: WriteGuard) -> BackupRunResult:
         f"planned Windows backup: {commands['windows_partclone']}",
         "planned SHA256 hash generation",
         "planned recovery-manifest.json finalize (last step)",
+        (
+            f"space estimate: method={estimate.estimation_method} "
+            f"windows_used={estimate.estimated_used_bytes} "
+            f"required_gb={estimate.estimated_required_gb}"
+        ),
     ]
+    if estimate.estimation_warning:
+        planned_ops.append(f"space estimate warning: {estimate.estimation_warning}")
+    if estimate.reason and estimate.estimation_method == "partition_size_fallback":
+        planned_ops.append(f"space estimate note: {estimate.reason}")
 
     if has_valid_backup(recovery_mount) and layout.recovery_image.mountpoint:
-        return BackupRunResult(
+        blocked = BackupRunResult(
             status="BLOCKED",
             dry_run=guard.dry_run,
             apply=guard.apply,
@@ -245,8 +304,6 @@ def plan_backup_run(guard: WriteGuard) -> BackupRunResult:
             reason="valid backup already exists",
             backup_targets=_targets_dict(layout),
             expected_image_paths=image_paths,
-            estimated_required_bytes=required_bytes,
-            estimated_required_gb=round(required_bytes / (1024**3), 2),
             planned_commands=commands,
             expected_manifest=build_expected_manifest(
                 layout=layout,
@@ -255,8 +312,9 @@ def plan_backup_run(guard: WriteGuard) -> BackupRunResult:
             ),
             planned_operations=planned_ops,
         )
+        return _result_from_estimate(estimate, base=blocked)
 
-    return BackupRunResult(
+    planned = BackupRunResult(
         status="PLANNED",
         dry_run=guard.dry_run,
         apply=guard.apply,
@@ -264,8 +322,6 @@ def plan_backup_run(guard: WriteGuard) -> BackupRunResult:
         can_backup=True,
         backup_targets=_targets_dict(layout),
         expected_image_paths=image_paths,
-        estimated_required_bytes=required_bytes,
-        estimated_required_gb=round(required_bytes / (1024**3), 2),
         planned_commands=commands,
         expected_manifest=build_expected_manifest(
             layout=layout,
@@ -274,6 +330,7 @@ def plan_backup_run(guard: WriteGuard) -> BackupRunResult:
         ),
         planned_operations=planned_ops,
     )
+    return _result_from_estimate(estimate, base=planned)
 
 
 def _targets_dict(layout) -> Dict[str, Any]:
@@ -350,6 +407,11 @@ def execute_backup_apply(guard: WriteGuard) -> BackupRunResult:
             expected_image_paths=plan.expected_image_paths,
             estimated_required_bytes=plan.estimated_required_bytes,
             estimated_required_gb=plan.estimated_required_gb,
+            estimated_used_bytes=plan.estimated_used_bytes,
+            estimation_method=plan.estimation_method,
+            estimation_warning=plan.estimation_warning,
+            recovery_image_free_bytes=plan.recovery_image_free_bytes,
+            estimation_details=plan.estimation_details,
             planned_commands=plan.planned_commands,
             expected_manifest=plan.expected_manifest,
             planned_operations=operations,
