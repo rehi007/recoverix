@@ -1,0 +1,20 @@
+# Local editor and runtime artifacts
+.idea/
+.recoveryboot_logs/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Accidental Windows-style paths created during cross-platform tests
+C:*
+
+# One-off bootstrap/download artifacts
+get-pip.py
+
+# Generated Recoverix build and test artifacts
+recovery-platform/release/commercial/
+recovery-platform/scripts/runtime_image/logs/
+recovery-platform/scripts/runtime_image/wget-log*
+recovery-platform/scripts/runtime_image/test.txt
+windows-status-app/build/
