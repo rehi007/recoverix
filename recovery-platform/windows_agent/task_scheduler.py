@@ -13,6 +13,7 @@ from windows_agent.logging_config import agent_logger, append_log, ensure_agent_
 logger = get_logger(__name__)
 
 TASK_NAME = "RecoveryBootMonitor"
+RECOVERIX_INSTALL_ROOT = Path(r"C:\Program Files\Recoverix")
 
 
 def build_register_task_script(
@@ -23,7 +24,7 @@ def build_register_task_script(
     """Return a PowerShell script body (single -Command string)."""
     py = str(python_executable.resolve()).replace("'", "''")
     wd = str(working_directory.resolve()).replace("'", "''")
-    # Boot: recovery after power-on / BIOS updates. Periodic: detect post-Windows Update drift.
+    # Boot only: wait one minute, repair if needed, then exit.
     return "; ".join(
         [
             "$ErrorActionPreference = 'Stop'",
@@ -32,14 +33,11 @@ def build_register_task_script(
             "$arg = '-m windows_agent.agent --once'",
             "$action = New-ScheduledTaskAction -Execute $cmd -Argument $arg -WorkingDirectory $wd",
             "$boot = New-ScheduledTaskTrigger -AtStartup",
-            "$start = (Get-Date).AddMinutes(5)",
-            "$periodic = New-ScheduledTaskTrigger -Once -At $start "
-            "-RepetitionInterval (New-TimeSpan -Hours 6) "
-            "-RepetitionDuration (New-TimeSpan -Days 3650)",
+            "$boot.Delay = 'PT1M'",
             "$principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' "
             "-LogonType ServiceAccount -RunLevel Highest",
             f"Register-ScheduledTask -TaskName '{TASK_NAME}' -Action $action "
-            "-Trigger @($boot, $periodic) -Principal $principal -Force",
+            "-Trigger $boot -Principal $principal -Force",
         ]
     )
 
@@ -52,7 +50,7 @@ def register_recovery_boot_monitor_task(
 ) -> int:
     """Create the RecoveryBootMonitor task (SYSTEM, highest privileges, hidden-capable settings)."""
     ensure_agent_file_logging()
-    wd = working_directory or Path.cwd()
+    wd = working_directory or RECOVERIX_INSTALL_ROOT
     append_log(
         "windows_agent.log",
         f"register_recovery_boot_monitor_task dry_run={dry_run} exe={python_executable} wd={wd}",

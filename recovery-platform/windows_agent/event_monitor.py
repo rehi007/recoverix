@@ -58,7 +58,7 @@ def telemetry_state_path() -> Path:
         return Path(root) / "last_firmware_telemetry.json"
     if os.name == "nt":
         pd = os.environ.get("PROGRAMDATA", r"C:\ProgramData")
-        return Path(pd) / "RecoveryBoot" / "state" / "last_firmware_telemetry.json"
+        return Path(pd) / "Recoverix" / "state" / "last_firmware_telemetry.json"
     return Path.cwd() / ".recoveryboot_state" / "last_firmware_telemetry.json"
 
 

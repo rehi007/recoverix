@@ -20,6 +20,7 @@ from windows_agent.event_monitor import (
 )
 from windows_agent.fix_bootorder_task import apply_bootorder_plan
 from windows_agent.logging_config import agent_logger, append_log, ensure_agent_file_logging, log_exception
+from windows_agent.nvram_writer import run_native_nvram_writer
 from windows_agent.preflight import WindowsSystemProbes
 from windows_agent.task_scheduler import register_recovery_boot_monitor_task
 from windows_agent.windows_state import build_windows_state
@@ -34,6 +35,7 @@ def run_agent_startup(
     read_boot: Callable[..., FirmwareAnalysisResult] = read_firmware_boot,
     plan_boot: Callable[..., BootOrderPlan] = plan_bootorder_recovery,
     command_runner: Callable[..., object] = run_command,
+    native_writer: Callable[..., int] = run_native_nvram_writer,
 ) -> int:
     """
     Agent startup flow: preflight → telemetry → plan → optional repair.
@@ -97,6 +99,22 @@ def run_agent_startup(
 
         if state.repair_blocked_reason:
             agent_logger().warning("repair blocked: %s", state.repair_blocked_reason)
+
+        if (
+            apply_repairs
+            and plan.create_required
+            and plan.status == "FAIL"
+            and "native UEFI NVRAM writer required" in (plan.reason or "")
+            and bitlocker.strip().upper() != "ON"
+            and analysis.windows_boot_manager is not None
+        ):
+            rc = native_writer(working_directory=Path.cwd(), command_runner=command_runner)
+            if rc == 0:
+                append_log("repair.log", "native writer applied RecoveryBoot repair")
+                agent_logger().info("native writer applied RecoveryBoot repair")
+                return 0
+            append_log("error.log", f"native writer failed rc={rc}")
+            return 5
 
         if not state.repair_required:
             if plan.action_required and plan.status == "PLANNED":

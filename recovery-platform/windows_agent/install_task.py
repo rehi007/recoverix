@@ -9,6 +9,7 @@ from typing import List, Optional
 
 from common.logger import get_logger, setup_logging
 from windows_agent.task_scheduler import register_recovery_boot_monitor_task
+from windows_agent.task_scheduler import RECOVERIX_INSTALL_ROOT
 
 logger = get_logger(__name__)
 
@@ -25,8 +26,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--working-directory",
         type=Path,
-        default=None,
-        help="Working directory for the task (default: cwd)",
+        default=RECOVERIX_INSTALL_ROOT,
+        help="Working directory for the task (default: C:\\Program Files\\Recoverix)",
     )
     parser.add_argument(
         "--dry-run",

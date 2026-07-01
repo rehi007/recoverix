@@ -14,13 +14,13 @@ LOG_BACKUP_COUNT = 5
 
 
 def get_log_directory() -> Path:
-    """Log root: %ProgramData%\\RecoveryBoot\\logs on Windows."""
+    """Log root: %ProgramData%\\Recoverix\\logs on Windows."""
     override = os.environ.get("RECOVERYBOOT_LOG_DIR")
     if override:
         return Path(override)
     if os.name == "nt":
         pd = os.environ.get("PROGRAMDATA", r"C:\ProgramData")
-        return Path(pd) / "RecoveryBoot" / "logs"
+        return Path(pd) / "Recoverix" / "logs"
     return Path.cwd() / ".recoveryboot_logs"
 
 

@@ -32,6 +32,17 @@ def _parse_created_entry_id(stdout: str) -> Optional[str]:
     return m.group(0) if m else None
 
 
+def _result_text(result: object) -> str:
+    stdout = (getattr(result, "stdout", "") or "").strip()
+    stderr = (getattr(result, "stderr", "") or "").strip()
+    parts = []
+    if stdout:
+        parts.append(f"stdout={stdout!r}")
+    if stderr:
+        parts.append(f"stderr={stderr!r}")
+    return " ".join(parts)
+
+
 def apply_bootorder_plan(
     plan: BootOrderPlan,
     *,
@@ -57,17 +68,25 @@ def apply_bootorder_plan(
             argv = ["cmd.exe", "/c", cmd] if os.name == "nt" else ["sh", "-c", cmd]
             result = command_runner(argv, dry_run=False, confirmed=confirmed)
             stdout = getattr(result, "stdout", "") or ""
-            created_id = _parse_created_entry_id(stdout) or created_id
-            msg = f"bcdedit create rc={getattr(result, 'returncode', -1)!r}"
+            rc = getattr(result, "returncode", -1)
+            msg = f"bcdedit create rc={rc!r} {_result_text(result)}".strip()
             log_lines.append(msg)
             repair_logger().info("create boot entry: %s", msg)
+            if rc != 0:
+                raise RuntimeError(msg)
+            created_id = _parse_created_entry_id(stdout) or created_id
+            if not created_id:
+                raise RuntimeError("bcdedit create succeeded but returned no entry identifier")
             continue
 
         argv = ["cmd.exe", "/c", cmd] if os.name == "nt" else ["sh", "-c", cmd]
         result = command_runner(argv, dry_run=False, confirmed=confirmed)
-        msg = f"bcdedit cmd rc={getattr(result, 'returncode', -1)!r}"
+        rc = getattr(result, "returncode", -1)
+        msg = f"bcdedit cmd rc={rc!r} {_result_text(result)}".strip()
         log_lines.append(msg)
         repair_logger().info("bcdedit: %s", cmd)
+        if rc != 0:
+            raise RuntimeError(f"{msg}; cmd={cmd}")
 
     return log_lines
 
