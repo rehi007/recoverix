@@ -1,0 +1,43 @@
+Recoverix Third Party Notices
+Product: Recoverix
+Version: T.1.0.0
+Publisher: FORYOUCOM
+Support: 1544-1879 / help@foryoucom.co.kr
+
+This file is a template for third-party software notices included with
+Recoverix. The final release must replace this template with the exact package
+list and license texts generated from the release payload.
+
+Recoverix may include open source software components distributed under
+licenses such as GPL, LGPL, MIT, BSD, Apache License 2.0, and other compatible
+licenses.
+
+The presence of a component in this notice does not imply endorsement by the
+component authors, projects, distributions, or trademark owners.
+
+Canonical, Ubuntu, Microsoft, Windows, and other names may be trademarks of
+their respective owners. Recoverix is a FORYOUCOM product and is not endorsed,
+certified, or sponsored by Canonical, Ubuntu, or Microsoft unless expressly
+stated in a separate written agreement.
+
+Final release requirements:
+
+1. List every third-party package included in the installer or runtime image.
+2. Include package name, version, copyright, license, and source reference.
+3. Include full license texts where required.
+4. Include source availability instructions where required.
+5. Keep this file available after installation under:
+   C:\Program Files\Recoverix\licenses\ThirdPartyNotices.txt
+
+Known categories that must be audited before release:
+
+- Linux kernel and firmware packages
+- bootloader and EFI-related packages
+- partclone and storage utilities
+- NTFS utilities
+- Python runtime and libraries, if distributed
+- GTK, GUI runtime, and related libraries
+- compression and hashing utilities
+- Windows-side native runtime dependencies
+- build-time components copied into runtime artifacts
+
