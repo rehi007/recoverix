@@ -1,0 +1,19 @@
+#!/bin/sh
+# Disable early console echo for Recoverix Runtime boots.
+
+PREREQ="00-recoverix-rootdir"
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+  prereqs) prereqs; exit 0 ;;
+esac
+
+grep -Eq '(^|[[:space:]])recoverix\.root=1([[:space:]]|$)' /proc/cmdline 2>/dev/null || exit 0
+
+for tty_dev in /dev/console /dev/tty0 /dev/tty1; do
+  [ -e "$tty_dev" ] || continue
+  stty -F "$tty_dev" -echo -icanon min 0 time 0 2>/dev/null || true
+done
+
+printf '\033[H\033[2J\033[3J' >/dev/tty1 2>/dev/null || true
+
+exit 0

@@ -27,7 +27,7 @@ path                    \\EFI\\Microsoft\\Boot\\bootmgfw.efi
 Firmware Boot Loader
 ---------------------
 identifier              {bbbb2222-2222-2222-2222-bbbbbbbbbbbb}
-description             RecoveryBoot
+description             Recoverix Boot Manager
 device                  partition=G:
 path                    \\EFI\\RecoveryBoot\\shimx64.efi
 
@@ -62,7 +62,7 @@ def test_identify_recovery_boot():
     entries, _, _ = parse_bcdedit_firmware(_SAMPLE_FIRMWARE_ENUM)
     recovery = identify_recovery_boot(entries)
     assert recovery is not None
-    assert recovery.description == "RecoveryBoot"
+    assert recovery.description == "Recoverix Boot Manager"
     assert "shimx64.efi" in (recovery.path or "").lower()
 
 
@@ -92,6 +92,70 @@ path                    \\EFI\\Microsoft\\Boot\\bootmgfw.efi
     assert result.recovery_boot is None
 
 
+def test_parse_korean_bcdedit_firmware_output():
+    text = """
+펌웨어 부팅 관리자
+---------------------
+식별자                  {fwbootmgr}
+표시 순서               {aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}
+                        {bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb}
+
+펌웨어 응용 프로그램(101fffff)
+---------------------
+식별자                  {aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}
+장치                    partition=C:
+경로                    \\EFI\\Microsoft\\Boot\\bootmgfw.efi
+설명                    Windows 부팅 관리자
+
+펌웨어 응용 프로그램(101fffff)
+---------------------
+식별자                  {bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb}
+장치                    partition=C:
+경로                    \\EFI\\ubuntu\\shimx64.efi
+설명                    ubuntu
+"""
+    result = analyze_firmware_output(text, dry_run=False)
+    assert result.status == "PASS"
+    assert result.windows_boot_manager is not None
+    assert result.windows_boot_manager.description == "Windows 부팅 관리자"
+    assert result.boot_order == [
+        "{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}",
+        "{bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb}",
+    ]
+
+
+def test_parse_korean_windows_boot_manager_section_title():
+    text = """
+펌웨어 부팅 관리자
+---------------------
+식별자                  {fwbootmgr}
+displayorder            {bootmgr}
+                        {280d2eaa-523b-11f1-8155-bc0041178553}
+
+Windows 부팅 관리자
+---------------------
+identifier              {bootmgr}
+device                  partition=\\Device\\HarddiskVolume1
+path                    \\EFI\\Microsoft\\Boot\\BOOTMGFW.EFI
+inherit                 {globalsettings}
+
+펌웨어 응용 프로그램(101fffff)
+---------------------
+identifier              {280d2eaa-523b-11f1-8155-bc0041178553}
+device                  partition=\\Device\\HarddiskVolume1
+path                    \\EFI\\ubuntu\\shimx64.efi
+description             ubuntu
+"""
+    result = analyze_firmware_output(text, dry_run=False)
+    assert result.status == "PASS"
+    assert result.windows_boot_manager is not None
+    assert result.windows_boot_manager.identifier == "{bootmgr}"
+    assert result.boot_order[:2] == [
+        "{bootmgr}",
+        "{280d2eaa-523b-11f1-8155-bc0041178553}",
+    ]
+
+
 def test_analyze_missing_windows_fails():
     text = """
 Firmware Boot Manager
@@ -102,7 +166,7 @@ displayorder            {bbbb2222-2222-2222-2222-bbbbbbbbbbbb}
 Firmware Boot Loader
 ---------------------
 identifier              {bbbb2222-2222-2222-2222-bbbbbbbbbbbb}
-description             RecoveryBoot
+description             Recoverix Boot Manager
 path                    \\EFI\\RecoveryBoot\\shimx64.efi
 """
     result = analyze_firmware_output(text, dry_run=False)
@@ -134,6 +198,19 @@ path                    \\EFI\\RecoveryBoot\\shimx64.efi
     recovery = identify_recovery_boot(entries)
     assert recovery is not None
     assert recovery.identifier == "{boot0012}"
+
+
+def test_recovery_boot_description_with_wrong_path_is_ignored():
+    text = """
+Windows 부팅 관리자
+---------------------
+identifier              {bad-copy}
+path                    \\EFI\\Microsoft\\Boot\\bootmgfw.efi
+description             "RecoveryBoot"
+"""
+    entries, _, _ = parse_bcdedit_firmware(text)
+    recovery = identify_recovery_boot(entries)
+    assert recovery is None
 
 
 def test_read_firmware_boot_dry_run():

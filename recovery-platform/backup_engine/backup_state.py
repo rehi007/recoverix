@@ -15,9 +15,14 @@ INCOMPLETE_MARKER_RELATIVE = Path("state/incomplete_backup")
 
 DEFAULT_IMAGE_FILES = {
     "gpt": "metadata/gpt_backup.bin",
-    "efi": "images/efi.pcl",
-    "windows": "images/system.pcl",
+    # Canonical schema (Recoverix Runtime UI/restore validation):
+    # - images/windows_backup.pcl
+    # - images/efi_backup.pcl
+    "efi": "images/efi_backup.pcl",
+    "windows": "images/windows_backup.pcl",
 }
+
+WINDOWS_USED_DOMAIN_RELATIVE = "metadata/windows_used_blocks.domain"
 
 
 class BackupStateError(Exception):

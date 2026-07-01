@@ -1,0 +1,44 @@
+# Recoverix direct recovery GRUB (EFI/RecoverixDirect/grub.cfg on ESP)
+# This path is for firmware F12/manual boot only. It enters Recoverix directly.
+
+set timeout=0
+set default=recoverix_runtime
+set timeout_style=hidden
+
+insmod part_gpt
+insmod part_msdos
+insmod fat
+insmod ext2
+insmod gzio
+insmod search
+insmod search_fs_uuid
+
+menuentry "Recoverix Runtime" --id recoverix_runtime --class recoverix {
+    clear
+    echo "Starting Recoverix Runtime..."
+    search --no-floppy --fs-uuid --set=root @RECOVERY_UUID@
+    linux   /boot/recoverix/vmlinuz-@KERNEL_VERSION@ \
+        recoverix.root=1 \
+        recoverix.uuid=@RECOVERY_UUID@ \
+        recoverix.gui=1 \
+        recoverix.safe=1 \
+        root=tmpfs \
+        ro quiet loglevel=3 rd.udev.log_level=3 systemd.show_status=0 vt.global_cursor_default=0 \
+        systemd.mask=getty@tty1.service \
+        systemd.unit=multi-user.target
+    initrd  /boot/recoverix/initrd.img-@KERNEL_VERSION@-recoverix
+}
+
+menuentry "Recoverix Runtime (systemd debug)" --class recoverix {
+    echo "Starting Recoverix Runtime (systemd debug)..."
+    search --no-floppy --fs-uuid --set=root @RECOVERY_UUID@
+    linux   /boot/recoverix/vmlinuz-@KERNEL_VERSION@ \
+        recoverix.root=1 \
+        recoverix.uuid=@RECOVERY_UUID@ \
+        recoverix.debug.xorg=1 \
+        recoverix.safe=1 \
+        root=tmpfs \
+        ro systemd.unit=multi-user.target \
+        systemd.log_level=debug systemd.log_target=console systemd.show_status=1
+    initrd  /boot/recoverix/initrd.img-@KERNEL_VERSION@-recoverix
+}

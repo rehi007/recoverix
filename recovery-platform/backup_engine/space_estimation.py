@@ -15,6 +15,7 @@ from common.logger import get_logger
 logger = get_logger(__name__)
 
 GPT_OVERHEAD_BYTES = 1024 * 1024
+WINDOWS_BACKUP_RESERVE_RATIO = 1.20
 
 _BYTE_RE = re.compile(r"(\d+)\s*(?:\([^)]*\))?")
 
@@ -389,25 +390,20 @@ def estimate_ntfs_used_bytes(
         )
         return used, method, None, details
 
-    if partition_size:
-        warn = (
-            "NTFS used-space probes failed; using full Windows partition size as fallback "
-            "(estimated_required_gb will be overstated)"
-        )
-        logger.warning(warn)
-        details.update(
-            {
-                "windows_total_bytes": partition_size,
-                "windows_used_bytes": partition_size,
-                "windows_free_bytes": 0,
-                "selected_method": "partition_size_fallback",
-                "fallback": True,
-            }
-        )
-        return int(partition_size), "partition_size_fallback", warn, details
-
-    details["selected_method"] = "unknown"
-    return 0, "unknown", "NTFS used-space estimation failed; no partition size available", details
+    warn = (
+        "NTFS used-space probes failed; refusing to estimate from full Windows partition size"
+    )
+    logger.warning(warn)
+    details.update(
+        {
+            "windows_total_bytes": partition_size,
+            "windows_used_bytes": 0,
+            "windows_free_bytes": None,
+            "selected_method": "ntfs_usage_unavailable",
+            "fallback": False,
+        }
+    )
+    return 0, "ntfs_usage_unavailable", warn, details
 
 
 def estimate_efi_backup_bytes(
@@ -495,7 +491,8 @@ def estimate_backup_space(layout: Any) -> BackupSizeEstimate:
         mountpoint=efi.mountpoint,
         partition_size=efi.size,
     )
-    required = GPT_OVERHEAD_BYTES + efi_bytes + win_used
+    windows_required = int(win_used * WINDOWS_BACKUP_RESERVE_RATIO) if win_used > 0 else 0
+    required = GPT_OVERHEAD_BYTES + efi_bytes + windows_required
     required_gb = round(required / (1024**3), 2)
 
     free = estimate_recovery_image_free_bytes(
@@ -511,13 +508,18 @@ def estimate_backup_space(layout: Any) -> BackupSizeEstimate:
         can_backup = False
         reason = "insufficient recovery image space"
 
-    if warn and method == "partition_size_fallback":
+    if method == "ntfs_usage_unavailable":
+        can_backup = False
+        reason = warn
+    elif warn:
         reason = warn if reason is None else f"{reason}; {warn}"
 
     details: Dict[str, Any] = {
         "windows": win_details,
         "efi_backup_bytes": efi_bytes,
         "gpt_overhead_bytes": GPT_OVERHEAD_BYTES,
+        "windows_backup_reserve_ratio": WINDOWS_BACKUP_RESERVE_RATIO,
+        "windows_required_bytes": windows_required,
         "recovery_image_free_bytes": free,
         "probes": probes,
         "selected_windows_method": method,

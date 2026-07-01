@@ -1,0 +1,5 @@
+# Release-aware obsolete package mapping for debootstrap seed resolution.
+# Format: SUITE OBSOLETE_PKG REPLACEMENT_PKG [# comment]
+# Used by recoverix_validate_runtime_package() before apt-get install.
+
+jammy ntfsprogs ntfs-3g  # ntfsprogs removed; NTFS tools provided by ntfs-3g

@@ -23,12 +23,14 @@ from backup_engine.partclone_wrapper import (
 )
 from common.logger import get_logger, setup_logging
 from partition_manager.models import LABEL_RECOVERY_IMAGE, LABEL_RECOVERY_LINUX
+from backup_engine.backup_state import DEFAULT_IMAGE_FILES, has_incomplete_backup
+from backup_engine.manifest import MANIFEST_FILENAME, load_recovery_manifest
 from recovery_runtime.integrity import find_manifest
 
 logger = get_logger(__name__)
 
-IMAGE_RELATIVE = Path("images/system.pcl")
-EFI_IMAGE_RELATIVE = Path("images/efi.pcl")
+IMAGE_RELATIVE = Path("images/windows_backup.pcl")
+EFI_IMAGE_RELATIVE = Path("images/efi_backup.pcl")
 GPT_METADATA_RELATIVE = Path("metadata/gpt_backup.bin")
 MANIFEST_RELATIVE = Path("recovery/manifest.json")
 DEFAULT_EXPECTED_MOUNT = "/mnt/recovery"
@@ -158,15 +160,62 @@ def discover_layout() -> Tuple[Optional[str], Optional[_DiscoveredLayout]]:
 
 
 def has_valid_backup(recovery_root: Path) -> bool:
-    image = recovery_root / IMAGE_RELATIVE
-    manifest = find_manifest(recovery_root) or recovery_root / MANIFEST_RELATIVE
-    if not image.is_file() or not manifest.is_file():
+    # Fail-closed when an incomplete backup marker exists.
+    if has_incomplete_backup(recovery_root):
         return False
+
+    # Prefer our canonical manifest layout, but tolerate legacy locations.
+    # `load_recovery_manifest()` will be updated to search metadata/ too.
     try:
-        data = json.loads(manifest.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+        manifest = load_recovery_manifest(recovery_root)
+    except FileNotFoundError:
+        # Fallback for very old layouts (best-effort; not required for canonical runtime).
+        manifest_path = find_manifest(recovery_root) or recovery_root / MANIFEST_RELATIVE
+        if not manifest_path.is_file():
+            return False
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return False
+
+    if not manifest.get("backup_complete"):
         return False
-    return bool(data.get("valid")) and bool(data.get("sha256")) and image.stat().st_size > 0
+    if not manifest.get("sha256_hashes"):
+        return False
+
+    # Ensure core artifacts exist and are non-empty.
+    required_relatives = [
+        DEFAULT_IMAGE_FILES["windows"],
+        DEFAULT_IMAGE_FILES["efi"],
+        DEFAULT_IMAGE_FILES["gpt"],
+    ]
+    for rel in required_relatives:
+        p = recovery_root / rel
+        if not p.is_file() or p.stat().st_size <= 0:
+            return False
+
+    manifest_ok = (
+        (recovery_root / "manifests" / "recovery-manifest.json").is_file()
+        or (recovery_root / "metadata" / "recovery-manifest.json").is_file()
+        or (recovery_root / "recovery-manifest.json").is_file()
+    )
+    if not manifest_ok:
+        return False
+
+    # UI/restore validation also expects sidecar SHA256 files.
+    hashes_dir = recovery_root / "hashes"
+    windows_stem = Path(DEFAULT_IMAGE_FILES["windows"]).stem
+    efi_stem = Path(DEFAULT_IMAGE_FILES["efi"]).stem
+    sidecars = [
+        hashes_dir / f"{windows_stem}.sha256",
+        hashes_dir / f"{efi_stem}.sha256",
+        hashes_dir / f"{Path(DEFAULT_IMAGE_FILES['gpt']).stem}.sha256",
+        hashes_dir / "manifest.sha256",
+    ]
+    if not all(p.is_file() for p in sidecars):
+        return False
+
+    return True
 
 
 def _planned_steps() -> List[str]:

@@ -96,11 +96,27 @@ def test_blocked_when_valid_backup_exists():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / "images").mkdir(parents=True)
-        (root / "images" / "system.pcl").write_bytes(b"data")
-        manifest = root / "recovery" / "manifest.json"
-        manifest.parent.mkdir(parents=True)
+        (root / "images" / "windows_backup.pcl").write_bytes(b"data")
+        (root / "images" / "efi_backup.pcl").write_bytes(b"data")
+        (root / "metadata").mkdir(parents=True, exist_ok=True)
+        (root / "metadata" / "gpt_backup.bin").write_bytes(b"gpt")
+        (root / "hashes").mkdir(parents=True, exist_ok=True)
+        (root / "hashes" / "windows_backup.sha256").write_text("deadbeef", encoding="utf-8")
+        (root / "hashes" / "efi_backup.sha256").write_text("deadbeef", encoding="utf-8")
+        (root / "hashes" / "gpt_backup.sha256").write_text("deadbeef", encoding="utf-8")
+        (root / "hashes" / "manifest.sha256").write_text("deadbeef", encoding="utf-8")
+        manifest = root / "metadata" / "recovery-manifest.json"
         manifest.write_text(
-            json.dumps({"valid": True, "sha256": "deadbeef"}),
+            json.dumps(
+                {
+                    "backup_complete": True,
+                    "sha256_hashes": {
+                        "images/windows_backup.pcl": "deadbeef",
+                        "images/efi_backup.pcl": "deadbeef",
+                        "metadata/gpt_backup.bin": "deadbeef",
+                    },
+                }
+            ),
             encoding="utf-8",
         )
         plan = build_backup_plan(layout=_layout(str(root)), bitlocker="OFF")
@@ -138,10 +154,10 @@ def test_planned_steps_include_gpt_efi_windows():
 def test_windows_partclone_command_format():
     cmd = format_partclone_ntfs_command(
         "/dev/nvme0n1p3",
-        Path("/mnt/recovery/images/system.pcl"),
+        Path("/mnt/recovery/images/windows_backup.pcl"),
     )
     assert cmd.startswith("partclone.ntfs -c -s /dev/nvme0n1p3")
-    assert cmd.endswith("/mnt/recovery/images/system.pcl")
+    assert cmd.endswith("/mnt/recovery/images/windows_backup.pcl")
 
 
 def test_gpt_backup_command_format():

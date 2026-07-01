@@ -1,0 +1,7 @@
+# Recoverix production runtime apt sources (Ubuntu jammy template).
+# Written to rootfs /etc/apt/sources.list at build time.
+# Placeholders: @MIRROR@ @SUITE@ @COMPONENTS@ (space-separated components per line)
+
+deb @MIRROR@ @SUITE@ @COMPONENTS@
+deb @MIRROR@ @SUITE@-updates @COMPONENTS@
+deb @MIRROR@ @SUITE@-security @COMPONENTS@

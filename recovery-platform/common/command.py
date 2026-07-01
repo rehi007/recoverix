@@ -39,6 +39,7 @@ def run_command(
     confirmed: bool = False,
     cwd: Optional[str] = None,
     env: Optional[Mapping[str, str]] = None,
+    input_text: Optional[str] = None,
     timeout: Optional[float] = None,
     check: bool = False,
 ) -> CommandResult:
@@ -64,6 +65,7 @@ def run_command(
     logger.info("executing: %s", display)
     completed = subprocess.run(
         argv,
+        input=input_text,
         capture_output=True,
         text=True,
         cwd=cwd,

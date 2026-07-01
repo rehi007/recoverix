@@ -1,0 +1,26 @@
+#!/bin/sh
+# Quietly pre-mount tmpfs on /root for the default Recoverix Runtime path.
+# This prevents initramfs mountroot from printing a visible failure line
+# before Recoverix overlay hooks take over.
+
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case $1 in
+  prereqs) prereqs; exit 0 ;;
+esac
+
+cmdline="$(cat /proc/cmdline 2>/dev/null || true)"
+case " ${cmdline} " in
+  *" recoverix.root=1 "*|*" recoverix.root=yes "*) ;;
+  *) exit 0 ;;
+esac
+
+case " ${cmdline} " in
+  *" root=tmpfs "*) ;;
+  *) exit 0 ;;
+esac
+
+mkdir -p /root
+mountpoint -q /root 2>/dev/null && exit 0
+mount -t tmpfs -o mode=0755 tmpfs /root >/dev/null 2>&1 || true
+exit 0

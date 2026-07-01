@@ -42,6 +42,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         required=False,
         help=f'Confirmation phrase (exact): "{RESTORE_CONFIRMATION_PHRASE}"',
     )
+    parser.add_argument(
+        "--compatible-restore",
+        action="store_true",
+        help="Allow disk replacement/hard-copy restore when compatibility checks pass",
+    )
     parser.add_argument("--json", action="store_true", help="Print JSON result")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -60,6 +65,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             apply=True,
             confirmed=True,
             confirmation_phrase=args.phrase,
+            compatible_restore=args.compatible_restore,
         )
     except ConfirmationRequiredError as exc:
         print(str(exc), file=sys.stderr)

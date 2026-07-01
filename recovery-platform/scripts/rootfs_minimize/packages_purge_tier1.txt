@@ -1,0 +1,65 @@
+# Tier 1 — safe desktop bloat removal (verify with 02_generate_purge_plan.sh first)
+# Estimated savings: ~3–4 GB package + ~2 GB snapd data
+
+snapd
+ubuntu-desktop
+ubuntu-desktop-minimal
+ubuntu-desktop-installer
+
+# Browsers / IDE / mail
+google-chrome-stable
+cursor
+firefox
+thunderbird
+
+# Office
+libreoffice-base-core
+libreoffice-calc
+libreoffice-common
+libreoffice-core
+libreoffice-draw
+libreoffice-gnome
+libreoffice-gtk3
+libreoffice-help-common
+libreoffice-help-en-us
+libreoffice-help-ko
+libreoffice-impress
+libreoffice-l10n-ko
+libreoffice-math
+libreoffice-ogltrans
+libreoffice-pdfimport
+libreoffice-style-breeze
+libreoffice-style-colibre
+libreoffice-style-elementary
+libreoffice-style-yaru
+libreoffice-writer
+
+# Games / media (examples — autoremove may catch more)
+aisleriot
+cheese
+rhythmbox
+totem
+transmission-gtk
+gnome-mahjongg
+gnome-mines
+gnome-sudoku
+quadrapassel
+five-or-more
+four-in-a-row
+gnome-chess
+gnome-robots
+gnome-taquin
+gnome-tetravex
+hitori
+iagno
+lightsoff
+tali
+
+# linux-firmware: kept via packages_keep.txt (amdgpu desktop needs /usr/lib/firmware/amdgpu)
+
+# Duplicate/old HWE kernel (adjust KEEP_KERNEL_FLAVOR in config.env)
+linux-image-6.8.0-40-generic
+linux-modules-6.8.0-40-generic
+linux-modules-extra-6.8.0-40-generic
+linux-headers-6.8.0-40-generic
+linux-hwe-6.8-headers-6.8.0-40

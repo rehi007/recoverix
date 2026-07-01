@@ -1,0 +1,151 @@
+#!/bin/sh
+# Recoverix: mount recovery ext4, squashfs (ro), overlay merged root.
+
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case $1 in
+  prereqs) prereqs; exit 0 ;;
+esac
+
+set +e
+
+mkdir -p /run/recoverix /run/recoverix-boot /run/rootfs-base \
+  /run/recoverix-overlay/upper /run/recoverix-overlay/work /mnt/rootfs-root /root
+
+. /scripts/functions
+
+if [ ! -f /scripts/recoverix-lib ]; then
+  panic "Recoverix: recoverix-lib missing from initrd"
+fi
+. /scripts/recoverix-lib
+
+recoverix_parse_cmdline
+recoverix_log_init
+recoverix_log_milestone "Recoverix overlay premount starting"
+
+BASE=/run/rootfs-base
+OVERLAY_PARENT=/run/recoverix-overlay
+UPPER=/run/recoverix-overlay/upper
+WORK=/run/recoverix-overlay/work
+MERGED=/mnt/rootfs-root
+BOOT_MNT=/run/recoverix-boot
+
+if [ -f /etc/recoverix/runtime.conf ]; then
+  # shellcheck disable=SC1091
+  . /etc/recoverix/runtime.conf
+  recoverix_log_debug "loaded /etc/recoverix/runtime.conf"
+fi
+
+if [ -n "${RECOVERIX_BASE_MOUNT}" ]; then
+  BASE="${RECOVERIX_BASE_MOUNT}"
+fi
+if [ -n "${RECOVERIX_MERGED_ROOT}" ]; then
+  MERGED="${RECOVERIX_MERGED_ROOT}"
+fi
+
+recoverix_log_debug "paths BASE=${BASE} MERGED=${MERGED}"
+
+recoverix_ensure_modules
+
+SQUASHFS=""
+BOOT_DEV=""
+UUID=""
+
+if UUID=$(recoverix_resolve_uuid 2>/dev/null); then
+  recoverix_log_debug "resolved uuid=${UUID}"
+  if BOOT_DEV=$(recoverix_wait_block "$UUID"); then
+    mkdir -p "$BOOT_MNT"
+    if mount -t ext4 -o ro,noatime "$BOOT_DEV" "$BOOT_MNT"; then
+      recoverix_log_info "runtime ext4 mounted at ${BOOT_MNT}"
+      SQUASHFS=$(recoverix_find_squashfs "$BOOT_MNT") || SQUASHFS=""
+    else
+      recoverix_log_warn "runtime ext4 mount failed (${BOOT_DEV})"
+    fi
+  else
+    recoverix_log_warn "block device not found for uuid ${UUID}"
+  fi
+else
+  recoverix_log_debug "no uuid resolved from cmdline/config"
+fi
+
+if [ -z "$SQUASHFS" ] && [ -n "${ROOT}" ]; then
+  recoverix_log_debug "fallback ROOT=${ROOT}"
+  if command -v resolve_device >/dev/null 2>&1; then
+    BOOT_DEV=$(resolve_device "${ROOT}" 2>/dev/null) || BOOT_DEV=""
+  fi
+  if [ -z "$BOOT_DEV" ]; then
+    BOOT_DEV="${ROOT}"
+  fi
+  if [ -n "$BOOT_DEV" ] && [ -b "$BOOT_DEV" ]; then
+    mkdir -p "$BOOT_MNT"
+    if ! mountpoint -q "$BOOT_MNT" 2>/dev/null; then
+      mount -t ext4 -o ro,noatime "$BOOT_DEV" "$BOOT_MNT" || \
+        recoverix_log_warn "fallback ext4 mount failed"
+    fi
+    if mountpoint -q "$BOOT_MNT" 2>/dev/null; then
+      SQUASHFS=$(recoverix_find_squashfs "$BOOT_MNT") || SQUASHFS=""
+    fi
+  fi
+fi
+
+if [ -z "$SQUASHFS" ] && mountpoint -q "$BOOT_MNT" 2>/dev/null; then
+  SQUASHFS=$(recoverix_find_squashfs "$BOOT_MNT") || SQUASHFS=""
+fi
+if [ -z "$SQUASHFS" ]; then
+  SQUASHFS=$(recoverix_find_squashfs "") || SQUASHFS=""
+fi
+
+if [ -z "$SQUASHFS" ]; then
+  recoverix_dump_overlay_failure "squashfs not found"
+  if [ "$RECOVERIX_ROOT_WANTED" = 1 ]; then
+    recoverix_fail "runtime squashfs not found"
+  fi
+  log_warning_msg "Recoverix: squashfs not found - skipping"
+  exit 0
+fi
+
+recoverix_log_info "runtime squashfs: ${SQUASHFS}"
+
+mkdir -p "$BASE"
+if ! recoverix_mount_squashfs_ro "$SQUASHFS" "$BASE"; then
+  recoverix_dump_squashfs_failure "mount command failed"
+  recoverix_fail "squashfs mount failed: ${SQUASHFS}"
+fi
+
+if ! recoverix_verify_squashfs_mounted "$BASE"; then
+  recoverix_fail "squashfs mount verify failed"
+fi
+
+mkdir -p "$MERGED"
+if ! recoverix_prepare_overlay_dirs "$OVERLAY_PARENT" "$UPPER" "$WORK" "$MERGED"; then
+  recoverix_dump_overlay_failure "prepare failed"
+  recoverix_fail "overlay prepare failed"
+fi
+
+if ! test -e "${BASE}/usr/sbin/init"; then
+  recoverix_dump_squashfs_failure "pre-overlay init guard"
+  recoverix_fail "overlay blocked: lowerdir init missing"
+fi
+
+if ! recoverix_mount_overlay "$BASE" "$UPPER" "$WORK" "$MERGED"; then
+  recoverix_dump_overlay_failure "overlay mount failed"
+  umount "$BASE" 2>/dev/null || true
+  recoverix_fail "overlay mount failed"
+fi
+
+recoverix_log_milestone "overlay mounted at ${MERGED}"
+
+if ! recoverix_verify_overlay_merged "$MERGED"; then
+  recoverix_fail "merged root verify failed"
+fi
+
+echo "$MERGED" > /run/recoverix/merged_root
+echo "$SQUASHFS" > /run/recoverix/squashfs_path
+echo "$BOOT_MNT" > /run/recoverix/boot_mount
+if [ -n "$UUID" ]; then
+  echo "$UUID" > /run/recoverix/boot_uuid
+fi
+
+recoverix_log_milestone "Recoverix overlay root ready for handoff (${MERGED})"
+log_success_msg "Recoverix: overlay root ready"
+exit 0

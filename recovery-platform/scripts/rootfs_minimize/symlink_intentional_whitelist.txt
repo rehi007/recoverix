@@ -1,0 +1,37 @@
+# Intentional dangling symlinks for overlay/squashfs/runtime rootfs builds.
+# One glob pattern per line (matched against path relative to ROOTFS root).
+# These are NOT errors — excluded from preflight squashfs WARN counts.
+
+var/lib/*
+var/cache/*
+run/*
+tmp/*
+dev/*
+proc/*
+sys/*
+snap/*
+var/lib/snapd/*
+var/lib/systemd/*
+var/lib/NetworkManager/*
+var/lib/dpkg/*
+var/lib/apt/*
+var/lib/polkit-1/*
+var/lib/AccountsService/*
+var/lib/upower/*
+etc/alternatives/*
+usr/share/icons/*
+usr/share/themes/*
+usr/share/mime/*
+usr/share/desktop-directories/*
+usr/share/applications/*
+usr/share/pixmaps/*
+usr/share/locale/*
+usr/share/zoneinfo/*
+usr/share/fonts/*
+usr/share/glib-2.0/*
+usr/share/gnome/*
+usr/share/ubuntu/*
+media/*
+mnt/*
+srv/*
+lost+found

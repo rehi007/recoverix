@@ -13,6 +13,7 @@ from recovery_runtime.integrity import check_manifest, verify_sha256_stub
 from recovery_runtime.runtime_context import MenuAvailability
 from recovery_runtime.state import RuntimeState
 from recovery_runtime.actions import run_backup_action, run_restore_action
+from recovery_runtime.runtime_context import RuntimeContext
 
 
 _SAMPLE_LSBLK = """
@@ -99,8 +100,8 @@ def test_restore_and_backup_disabled():
         ),
     )
     noop = lambda _: ""
-    assert "불가" in run_restore_action(ctx, input_func=noop) or "disabled" in run_restore_action(ctx, input_func=noop).lower()
-    assert "불가" in run_backup_action(ctx, input_func=noop) or "disabled" in run_backup_action(ctx, input_func=noop).lower()
+    assert "disabled" in run_restore_action(ctx, input_func=noop).lower()
+    assert "disabled" in run_backup_action(ctx, input_func=noop).lower()
 
 
 def test_state_summary():
@@ -117,3 +118,28 @@ def test_state_summary():
     text = "\n".join(state.summary_lines())
     assert "RECOVERY_IMAGE" in text
     assert "disabled" in text
+
+
+def test_state_summary_skips_separator_only_last_message_lines():
+    state = RuntimeState(
+        last_message=(
+            "============================================================\n"
+            " System Status\n"
+            "============================================================\n"
+            " Current runtime detection and recovery readiness."
+        )
+    )
+
+    text = "\n".join(state.summary_lines())
+
+    assert "Last message   : System Status" in text
+    assert "Last message   : ============================================================" not in text
+
+
+def test_validation_exception_reason_includes_detail():
+    reason = RuntimeContext._human_validation_reason(
+        "validation_exception",
+        {"error": "Permission denied: windows_backup.pcl"},
+    )
+    assert "validation_exception" in reason
+    assert "Permission denied" in reason

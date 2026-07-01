@@ -1,6 +1,7 @@
 """Tests for windows_agent.preflight CLI."""
 
 import json
+import sys
 from unittest.mock import MagicMock, patch
 
 import windows_agent.preflight as preflight

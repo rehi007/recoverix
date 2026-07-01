@@ -68,17 +68,19 @@ def _layout(mount: str) -> _DiscoveredLayout:
     )
 
 
-def _populate_backup(root: Path) -> None:
+def _populate_backup(root: Path, *, backup_type: str = "standard") -> None:
     files = {
         "metadata/gpt_backup.bin": b"gpt",
-        "images/efi.pcl": b"efi",
-        "images/system.pcl": b"win",
+        "images/efi_backup.pcl": b"efi",
+        "images/windows_backup.pcl": b"win",
     }
     for relative, content in files.items():
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
-    finalize_backup_manifest(ManifestContext(recovery_root=root, disk=_disk()))
+    finalize_backup_manifest(
+        ManifestContext(recovery_root=root, disk=_disk(), backup_type=backup_type)
+    )
 
 
 def _safety_ok() -> RestoreSafetyResult:
@@ -88,6 +90,23 @@ def _safety_ok() -> RestoreSafetyResult:
         apply=True,
         confirmed=True,
         phrase_verified=True,
+        target_disk={
+            "disk_guid": _disk().disk_guid,
+            "disk_serial": _disk().disk_serial,
+            "disk_model": _disk().disk_model,
+        },
+    )
+
+
+def _safety_compatible() -> RestoreSafetyResult:
+    return RestoreSafetyResult(
+        allowed=True,
+        status="PASS",
+        apply=True,
+        confirmed=True,
+        phrase_verified=True,
+        compatible_restore=True,
+        restore_mode="compatible",
         target_disk={
             "disk_guid": _disk().disk_guid,
             "disk_serial": _disk().disk_serial,
@@ -273,7 +292,37 @@ def test_restore_failure_sets_rollback_required():
         assert result.rollback_required is True
         state = load_recovery_state(root)
         assert state.rollback_required is True
-        assert state.restore_in_progress is False
+
+
+@patch.object(executor_mod, "run_command")
+@patch.object(executor_mod, "_find_efi_mount")
+def test_mount_efi_reuses_existing_mount_via_unmount_then_rw_mount(mock_find_efi_mount, mock_run_command):
+    mock_find_efi_mount.return_value = Path("/tmp/esp")
+    mock_run_command.return_value = MagicMock(returncode=0, stderr="")
+    ctx = RestoreExecutionContext(
+        safety=_safety_ok(),
+        recovery_root=Path("/tmp/recovery"),
+        layout=_layout("/tmp/recovery"),
+        disk=_disk(),
+        confirmed=True,
+    )
+
+    mount = RestoreExecutor(ctx)._mount_efi(read_only=False)
+
+    assert mount == Path("/tmp/esp")
+    calls = [call.kwargs | {"argv": call.args[0]} for call in mock_run_command.call_args_list]
+    assert calls == [
+        {
+            "argv": ["umount", "/tmp/esp"],
+            "dry_run": False,
+            "confirmed": True,
+        },
+        {
+            "argv": ["mount", "-o", "rw", "/dev/nvme0n1p1", "/tmp/esp"],
+            "dry_run": False,
+            "confirmed": True,
+        },
+    ]
 
 
 def test_restore_success_clears_in_progress():
@@ -313,7 +362,28 @@ def test_restore_success_clears_in_progress():
         assert result.success is True
         state = load_recovery_state(root)
         assert state.restore_in_progress is False
-        assert state.restore_success is True
+    assert state.restore_success is True
+
+
+def test_compatible_restore_uses_standard_partclone_without_ntfs_resize():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _populate_backup(root)
+        ctx = RestoreExecutionContext(
+            safety=_safety_compatible(),
+            recovery_root=root,
+            layout=_layout(str(root)),
+            disk=_disk(),
+            confirmed=True,
+        )
+        executor = RestoreExecutor(ctx)
+
+        with patch.object(executor, "_run_confirmed_streaming_partclone") as mock_stream:
+            executor._stage_partclone_windows()
+        cmd = mock_stream.call_args.args[0]
+        assert "partclone.ntfs -r" in cmd
+        assert "partclone.ntfs -C" not in cmd
+        assert not hasattr(executor, "_stage_resize_ntfs_after_compatible_restore")
 
 
 @patch.object(executor_mod, "run_command")

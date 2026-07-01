@@ -1,0 +1,436 @@
+#!/bin/sh
+# Recoverix initramfs shared helpers (POSIX sh / BusyBox ash).
+
+RECOVERIX_DEBUG=0
+RECOVERIX_ROOT_WANTED=0
+RECOVERIX_LOG_DIR=/run/recoverix
+RECOVERIX_LOG_FILE="${RECOVERIX_LOG_DIR}/boot.log"
+
+recoverix_log_init() {
+	mkdir -p "${RECOVERIX_LOG_DIR}"
+	if [ ! -f "${RECOVERIX_LOG_FILE}" ]; then
+		: >"${RECOVERIX_LOG_FILE}"
+	fi
+}
+
+recoverix_log_to_file() {
+	# shellcheck disable=SC2039
+	printf '%s\n' "$*" >>"${RECOVERIX_LOG_FILE}"
+}
+
+recoverix_log_info() {
+	recoverix_log_to_file "[INFO] $*"
+	if [ "${RECOVERIX_DEBUG}" = 1 ]; then
+		printf '%s\n' "[INFO] $*"
+	fi
+}
+
+recoverix_log_milestone() {
+	recoverix_log_to_file "[INFO] $*"
+	if [ "${RECOVERIX_DEBUG}" = 1 ]; then
+		printf '%s\n' "[INFO] $*"
+	fi
+}
+
+recoverix_log_warn() {
+	recoverix_log_to_file "[WARN] $*"
+	if [ "${RECOVERIX_DEBUG}" = 1 ]; then
+		printf '%s\n' "[WARN] $*"
+	fi
+}
+
+recoverix_log_error() {
+	recoverix_log_to_file "[ERROR] $*"
+	printf '%s\n' "[ERROR] $*"
+}
+
+recoverix_log_debug() {
+	recoverix_log_to_file "[DEBUG] $*"
+	if [ "${RECOVERIX_DEBUG}" = 1 ]; then
+		printf '%s\n' "[DEBUG] $*"
+	fi
+}
+
+recoverix_checkpoint() {
+	recoverix_log_debug "$*"
+}
+
+recoverix_parse_cmdline() {
+	RECOVERIX_DEBUG=0
+	RECOVERIX_ROOT_WANTED=0
+	for x in $(cat /proc/cmdline 2>/dev/null); do
+		case $x in
+		recoverix.debug=1|recoverix.debug=yes|recoverix.debug)
+			RECOVERIX_DEBUG=1
+			;;
+		recoverix.root=1|recoverix.root=yes)
+			RECOVERIX_ROOT_WANTED=1
+			;;
+		esac
+	done
+}
+
+recoverix_fail() {
+	recoverix_log_error "$*"
+	if [ "${RECOVERIX_DEBUG}" = 1 ]; then
+		recoverix_dump_overlay_failure "$*"
+		recoverix_log_warn "pausing 15s for console review (recoverix.debug=1)"
+		sleep 15
+	fi
+	log_begin_msg "Recoverix: $*"
+	log_end_msg 1
+	if [ "${RECOVERIX_ROOT_WANTED}" = 1 ]; then
+		panic "Recoverix: $*"
+	fi
+}
+
+recoverix_ensure_modules() {
+	for m in ext4 squashfs overlay loop; do
+		modprobe -q $m 2>/dev/null || true
+	done
+	if [ "${RECOVERIX_DEBUG}" = 1 ]; then
+		recoverix_log_debug "overlay in /proc/filesystems:"
+		grep overlay /proc/filesystems 2>/dev/null | while read -r line; do
+			recoverix_log_debug "  ${line}"
+		done || recoverix_log_debug "  (missing)"
+	fi
+}
+
+recoverix_resolve_uuid() {
+	x=""
+	uuid=""
+	for x in $(cat /proc/cmdline 2>/dev/null); do
+		case $x in
+		recoverix.uuid=*)
+			uuid=${x#recoverix.uuid=}
+			if [ -n "$uuid" ]; then
+				echo "$uuid"
+				return 0
+			fi
+			;;
+		root=UUID=*)
+			uuid=${x#root=UUID=}
+			if [ -n "$uuid" ]; then
+				echo "$uuid"
+				return 0
+			fi
+			;;
+		esac
+	done
+	if [ -f /etc/recoverix/runtime.conf ]; then
+		# shellcheck disable=SC1091
+		. /etc/recoverix/runtime.conf
+		if [ -n "${RECOVERY_ROOT_UUID}" ] && [ "${RECOVERY_ROOT_UUID}" != "RECOVERY_ROOT_UUID" ]; then
+			echo "${RECOVERY_ROOT_UUID}"
+			return 0
+		fi
+	fi
+	return 1
+}
+
+recoverix_wait_block() {
+	uuid=$1
+	dev="/dev/disk/by-uuid/${uuid}"
+	count=0
+	while [ ! -e "$dev" ] && [ $count -lt 300 ]; do
+		sleep 0.1
+		count=$((count + 1))
+	done
+	if [ ! -e "$dev" ]; then
+		return 1
+	fi
+	echo "$dev"
+	return 0
+}
+
+recoverix_find_squashfs() {
+	bootmnt=$1
+	candidate=""
+	for candidate in \
+		"${RECOVERIX_SQUASHFS_PATH}" \
+		"${bootmnt}/boot/recoverix/runtime.squashfs" \
+		"${bootmnt}/recovery/runtime/runtime.squashfs" \
+		"/boot/recoverix/runtime.squashfs" \
+		"/recovery/runtime/runtime.squashfs"
+	do
+		if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+			echo "$candidate"
+			return 0
+		fi
+	done
+	return 1
+}
+
+recoverix_dump_squashfs_failure() {
+	reason=${1:-unknown}
+	recoverix_log_debug "squashfs dump: ${reason}"
+	recoverix_log_debug "--- mount ---"
+	mount 2>/dev/null | while read -r line; do recoverix_log_debug "  ${line}"; done || true
+	recoverix_log_debug "--- /proc/mounts ---"
+	cat /proc/mounts 2>/dev/null | while read -r line; do recoverix_log_debug "  ${line}"; done || true
+	if command -v losetup >/dev/null 2>&1; then
+		recoverix_log_debug "--- losetup -a ---"
+		losetup -a 2>/dev/null | while read -r line; do recoverix_log_debug "  ${line}"; done || true
+	fi
+	recoverix_log_debug "--- ls -la /run/rootfs-base ---"
+	ls -la /run/rootfs-base 2>&1 | while read -r line; do recoverix_log_debug "  ${line}"; done || true
+	recoverix_log_debug "--- dmesg tail 30 ---"
+	dmesg 2>/dev/null | tail -30 | while read -r line; do recoverix_log_debug "  ${line}"; done || true
+}
+
+recoverix_mount_squashfs_ro() {
+	sq=$1
+	mnt=$2
+	rc=1
+	lrc=1
+
+	recoverix_log_debug "squashfs mount: file=${sq} target=${mnt}"
+	mkdir -p "$mnt"
+	umount "$mnt" 2>/dev/null || true
+
+	mount -t squashfs -o ro,loop "$sq" "$mnt"
+	rc=$?
+	recoverix_log_debug "squashfs mount rc=${rc} (loop)"
+	if [ "$rc" -eq 0 ]; then
+		return 0
+	fi
+
+	if command -v losetup >/dev/null 2>&1; then
+		loopdev=$(losetup -f 2>/dev/null)
+		lrc=$?
+		recoverix_log_debug "losetup -f rc=${lrc} dev=${loopdev:-none}"
+		if [ "$lrc" -eq 0 ] && [ -n "$loopdev" ]; then
+			losetup "$loopdev" "$sq"
+			lrc=$?
+			recoverix_log_debug "losetup attach rc=${lrc} ${loopdev} <- ${sq}"
+			if [ "$lrc" -eq 0 ]; then
+				mount -t squashfs -o ro "$loopdev" "$mnt"
+				rc=$?
+				recoverix_log_debug "squashfs mount rc=${rc} (losetup ${loopdev})"
+				if [ "$rc" -eq 0 ]; then
+					echo "$loopdev" > /run/recoverix/squashfs_loop 2>/dev/null || true
+					return 0
+				fi
+				umount "$mnt" 2>/dev/null || true
+			fi
+			losetup -d "$loopdev" 2>/dev/null || true
+		fi
+	fi
+
+	recoverix_log_error "squashfs mount failed: ${sq}"
+	return 1
+}
+
+recoverix_verify_squashfs_mounted() {
+	mnt=$1
+	mp_ok=0
+
+	recoverix_log_debug "squashfs verify: ${mnt}"
+
+	if command -v mountpoint >/dev/null 2>&1; then
+		if mountpoint -q "$mnt"; then
+			mp_ok=1
+		else
+			recoverix_log_debug "mountpoint check failed: ${mnt}"
+		fi
+	else
+		if grep -qE " ${mnt} " /proc/mounts 2>/dev/null; then
+			mp_ok=1
+		else
+			recoverix_log_debug "mountpoint check failed via /proc/mounts: ${mnt}"
+		fi
+	fi
+
+	if [ "$mp_ok" -eq 0 ]; then
+		recoverix_log_error "squashfs verify failed: not a mountpoint (${mnt})"
+		recoverix_dump_squashfs_failure "mountpoint"
+		return 1
+	fi
+
+	if ! mount 2>/dev/null | grep -q "${mnt}"; then
+		recoverix_log_error "squashfs verify failed: missing from mount output"
+		recoverix_dump_squashfs_failure "mount output"
+		return 1
+	fi
+
+	if ! test -d "${mnt}/usr"; then
+		recoverix_log_error "squashfs verify failed: usr/ missing"
+		recoverix_dump_squashfs_failure "usr missing"
+		return 1
+	fi
+
+	if ! test -e "${mnt}/usr/sbin/init"; then
+		recoverix_log_error "squashfs verify failed: usr/sbin/init missing"
+		recoverix_dump_squashfs_failure "init missing"
+		return 1
+	fi
+
+	recoverix_log_info "squashfs verify OK (${mnt})"
+	return 0
+}
+
+recoverix_verify_lower_strict() {
+	recoverix_verify_squashfs_mounted "$1"
+}
+
+recoverix_dir_empty() {
+	d=$1
+	if [ ! -d "$d" ]; then
+		return 1
+	fi
+	if [ -z "$(ls -A "$d" 2>/dev/null)" ]; then
+		return 0
+	fi
+	return 1
+}
+
+recoverix_same_filesystem() {
+	dev_a=$(df -P "$1" 2>/dev/null | awk 'NR==2{print $1}')
+	dev_b=$(df -P "$2" 2>/dev/null | awk 'NR==2{print $1}')
+	if [ -n "$dev_a" ] && [ "$dev_a" = "$dev_b" ]; then
+		return 0
+	fi
+	return 1
+}
+
+recoverix_prepare_overlay_dirs() {
+	parent=$1
+	upper=$2
+	work=$3
+	merged=$4
+
+	mkdir -p "$parent" "$upper" "$work" "$merged"
+
+	umount "$merged" 2>/dev/null || true
+	umount "$work" 2>/dev/null || true
+	umount "$upper" 2>/dev/null || true
+	umount "$parent" 2>/dev/null || true
+
+	rm -rf "${work}/"/* 2>/dev/null || true
+	rm -rf "${upper}/"/* 2>/dev/null || true
+
+	if ! recoverix_dir_empty "$work"; then
+		recoverix_log_error "overlay prepare: workdir not empty (${work})"
+		return 1
+	fi
+	if ! recoverix_dir_empty "$merged"; then
+		recoverix_log_error "overlay prepare: merged not empty (${merged})"
+		return 1
+	fi
+
+	if ! touch "${upper}/.recoverix-write-test" 2>/dev/null; then
+		recoverix_log_error "overlay prepare: upper not writable (${upper})"
+		return 1
+	fi
+	rm -f "${upper}/.recoverix-write-test" 2>/dev/null || true
+
+	if ! recoverix_same_filesystem "$upper" "$work"; then
+		recoverix_log_error "overlay prepare: upper/work on different filesystems"
+		return 1
+	fi
+
+	recoverix_log_debug "overlay prepare dirs OK"
+	return 0
+}
+
+recoverix_mount_overlay() {
+	base=$1
+	upper=$2
+	work=$3
+	merged=$4
+	rc=1
+
+	opts="lowerdir=${base},upperdir=${upper},workdir=${work},index=off,redirect_dir=off"
+	recoverix_log_debug "overlay mount: ${merged}"
+
+	mount -t overlay overlay -o "$opts" "$merged"
+	rc=$?
+	recoverix_log_debug "overlay mount rc=${rc} (overlay)"
+	if [ $rc -eq 0 ]; then
+		return 0
+	fi
+
+	mount -t overlay none -o "$opts" "$merged"
+	rc=$?
+	recoverix_log_debug "overlay mount rc=${rc} (none)"
+	if [ $rc -eq 0 ]; then
+		return 0
+	fi
+
+	opts="lowerdir=${base},upperdir=${upper},workdir=${work},index=off"
+	mount -t overlay overlay -o "$opts" "$merged"
+	rc=$?
+	recoverix_log_debug "overlay mount rc=${rc} (index=off)"
+	if [ $rc -eq 0 ]; then
+		return 0
+	fi
+
+	recoverix_log_error "overlay mount failed: ${merged}"
+	return 1
+}
+
+recoverix_verify_overlay_merged() {
+	merged=$1
+	if test -e "${merged}/usr/sbin/init"; then
+		recoverix_log_info "merged root init OK (${merged})"
+		return 0
+	fi
+	recoverix_log_error "merged root missing usr/sbin/init (${merged})"
+	return 1
+}
+
+recoverix_dump_overlay_failure() {
+	reason=${1:-unknown}
+	recoverix_log_debug "overlay dump: ${reason}"
+	recoverix_log_debug "--- mount ---"
+	mount 2>/dev/null | while read -r line; do recoverix_log_debug "  ${line}"; done || true
+	recoverix_log_debug "--- /proc/mounts ---"
+	cat /proc/mounts 2>/dev/null | while read -r line; do recoverix_log_debug "  ${line}"; done || true
+	if command -v losetup >/dev/null 2>&1; then
+		recoverix_log_debug "--- losetup -a ---"
+		losetup -a 2>/dev/null | while read -r line; do recoverix_log_debug "  ${line}"; done || true
+	fi
+	if command -v findmnt >/dev/null 2>&1; then
+		recoverix_log_debug "--- findmnt ---"
+		findmnt 2>/dev/null | while read -r line; do recoverix_log_debug "  ${line}"; done || true
+	fi
+	for d in /run/rootfs-base /run/recoverix-overlay /run/recoverix-overlay/upper \
+		/run/recoverix-overlay/work /mnt/rootfs-root /run/recoverix-boot; do
+		recoverix_log_debug "--- ls -la ${d} ---"
+		ls -la "$d" 2>&1 | while read -r line; do recoverix_log_debug "  ${line}"; done || true
+	done
+	recoverix_log_debug "--- dmesg tail 30 ---"
+	dmesg 2>/dev/null | tail -30 | while read -r line; do recoverix_log_debug "  ${line}"; done || true
+}
+
+recoverix_mountpoint_ok() {
+	mnt=$1
+	if command -v mountpoint >/dev/null 2>&1; then
+		if mountpoint -q "$mnt" 2>/dev/null; then
+			return 0
+		fi
+	fi
+	if grep -qE " ${mnt} type " /proc/mounts 2>/dev/null; then
+		return 0
+	fi
+	if grep -qE " ${mnt} " /proc/mounts 2>/dev/null; then
+		return 0
+	fi
+	if mount 2>/dev/null | grep -qE " on ${mnt} "; then
+		return 0
+	fi
+	return 1
+}
+
+recoverix_resolve_init() {
+	merged=$1
+	if test -e "${merged}/usr/sbin/init"; then
+		echo "/usr/sbin/init"
+		return 0
+	fi
+	if test -e "${merged}/sbin/init"; then
+		echo "/sbin/init"
+		return 0
+	fi
+	return 1
+}

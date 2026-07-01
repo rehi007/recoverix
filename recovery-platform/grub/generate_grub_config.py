@@ -29,7 +29,7 @@ _DEFAULT_RECOVERY_INITRD = "/recovery/initrd.img"
 class GrubConfigOptions:
     """Inputs for grub.cfg generation."""
 
-    timeout: int = 5
+    timeout: int = 2
     default_index: int = 0
     windows_efi_path: str = _WINDOWS_EFI_PATH
     recovery_kernel: str = _DEFAULT_RECOVERY_KERNEL
@@ -131,7 +131,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         default=None,
         help="Optional template path (default: efi_assets/grub.cfg.template)",
     )
-    parser.add_argument("--timeout", type=int, default=5, help="GRUB menu timeout")
+    parser.add_argument("--timeout", type=int, default=2, help="GRUB menu timeout")
     parser.add_argument(
         "--recovery-kernel",
         default=_DEFAULT_RECOVERY_KERNEL,

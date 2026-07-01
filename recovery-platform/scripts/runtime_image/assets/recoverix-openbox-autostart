@@ -1,0 +1,38 @@
+#!/bin/sh
+# Recoverix UI fallback launcher for openbox sessions.
+# This complements XDG autostart so UI still appears when X is started
+# directly via openbox-session (for example recoverix-xorg-start fallback).
+
+LOG="${RECOVERIX_GUI_FORENSIC_LOG:-/var/log/recoverix-gui.log}"
+TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
+touch "$LOG" 2>/dev/null || LOG="/tmp/recoverix-gui.log"
+
+{
+  echo ""
+  echo "===== recoverix-openbox-autostart ${TS} ====="
+  echo "DISPLAY=${DISPLAY:-unset}"
+  echo "XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-unset}"
+  echo "DESKTOP_SESSION=${DESKTOP_SESSION:-unset}"
+} >>"$LOG" 2>&1 || true
+
+if [ "${RECOVERIX_UI_SESSION_MANAGED:-0}" = "1" ]; then
+  echo "session-managed launch active; skip openbox autostart fallback" >>"$LOG" 2>&1 || true
+  exit 0
+fi
+
+if pgrep -f 'recovery_runtime\.gtk_ui\.main|recoverix-recovery-ui' >/dev/null 2>&1; then
+  echo "recoverix-ui already running; skip duplicate launch" >>"$LOG" 2>&1 || true
+  exit 0
+fi
+
+if [ ! -x /usr/local/sbin/recoverix-recovery-ui ]; then
+  echo "missing launcher: /usr/local/sbin/recoverix-recovery-ui" >>"$LOG" 2>&1 || true
+  exit 0
+fi
+
+/usr/local/sbin/recoverix-recovery-ui >>"$LOG" 2>&1 &
+echo "recoverix-ui launched from openbox autostart pid=$!" >>"$LOG" 2>&1 || true
+
+exit 0

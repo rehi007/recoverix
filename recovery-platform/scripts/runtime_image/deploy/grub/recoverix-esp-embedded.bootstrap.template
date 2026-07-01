@@ -1,0 +1,17 @@
+# Recoverix embedded GRUB bootstrap (grub-mkstandalone only — not written to ESP)
+# recoverix-embedded-bootstrap: v2
+# Locates ESP by UUID, then configfile to external menu grub.cfg.
+
+# Recoverix standalone GRUB active
+set recoverix_standalone=1
+set prefix=(memdisk)/boot/grub
+export prefix
+
+insmod part_gpt
+insmod fat
+insmod search
+insmod search_fs_uuid
+
+search --no-floppy --fs-uuid --set=root @ESP_UUID@
+
+configfile ($root)/@RECOVERYBOOT_REL_DIR@/grub.cfg

@@ -1,0 +1,21 @@
+# Display manager (gdm3) dependency chain — allowed on jammy (simulate allowlist + purity skip).
+# Recoverix user session: openbox (AccountsService Session=openbox), NOT GNOME desktop.
+
+gdm3
+gnome-shell
+gnome-session-bin
+gnome-session-common
+gnome-settings-daemon
+mutter
+mutter-common
+evolution-data-server
+gir1.2-gdm-1.0
+libgdm1
+gsettings-desktop-schemas
+libcanberra-gtk3-0
+libcanberra0
+at-spi2-core
+dconf-cli
+dconf-gsettings-backend
+accountsservice
+libaccountsservice0

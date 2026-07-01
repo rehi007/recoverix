@@ -1,0 +1,85 @@
+#!/bin/sh
+# initramfs-tools hook: overlay/squashfs/ext4 + Recoverix scripts for Runtime boot.
+# Installed into ROOTFS only via 20_install_initramfs_hook.sh — not host.
+
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+  prereqs) prereqs; exit 0 ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+manual_add_modules overlay
+manual_add_modules squashfs
+manual_add_modules loop
+manual_add_modules ext4
+
+for bin in switch_root run-init mount umount losetup blkid modprobe stty; do
+  if command -v "$bin" >/dev/null 2>&1; then
+    copy_exec "$(command -v "$bin")" /bin/ 2>/dev/null || \
+      copy_exec "$(command -v "$bin")" /sbin/ 2>/dev/null || true
+  fi
+done
+
+mkdir -p "$DESTDIR/scripts"
+if [ -f /etc/initramfs-tools/scripts/recoverix-lib ]; then
+  cp -a /etc/initramfs-tools/scripts/recoverix-lib "$DESTDIR/scripts/recoverix-lib"
+elif [ -f "$(dirname "$0")/../scripts/recoverix-lib" ]; then
+  cp -a "$(dirname "$0")/../scripts/recoverix-lib" "$DESTDIR/scripts/recoverix-lib"
+fi
+chmod 0755 "$DESTDIR/scripts/recoverix-lib" 2>/dev/null || true
+
+# root=tmpfs in the default Runtime path triggers initramfs mountroot logic
+# before Recoverix local-premount hooks run. Ensure /root exists inside the
+# initramfs image so mountroot does not emit a visible failure line.
+mkdir -p "$DESTDIR/root"
+
+# Recoverix Runtime uses root=tmpfs only to satisfy initramfs argument
+# validation. The real root is handed off later by Recoverix overlay logic.
+# Patch the generated initramfs local script so it skips the visible non-fatal
+# tmpfs mount attempt only for recoverix.root=1 boots.
+if [ -f "$DESTDIR/scripts/local" ]; then
+  _recoverix_local_tmp="$(mktemp)"
+  awk '
+    BEGIN {
+      patched = 0
+      skip_mount_block = 0
+    }
+    /# Mount root/ && patched == 0 {
+      print
+      print "        if [ \"${ROOT}\" = \"tmpfs\" ] && grep -Eq '\''(^|[[:space:]])recoverix.root=(1|yes)([[:space:]]|$)'\'' /proc/cmdline 2>/dev/null; then"
+      print "                mkdir -p \"${rootmnt?}\""
+      print "                mountroot_status=0"
+      print "        else"
+      skip_mount_block = 1
+      patched = 1
+      next
+    }
+    skip_mount_block == 1 && /mountroot_status="\$\?"/ {
+      print "        # shellcheck disable=SC2086"
+      print "        mount ${roflag} ${FSTYPE:+-t \"${FSTYPE}\"} ${ROOTFLAGS} \"${ROOT}\" \"${rootmnt?}\""
+      print "        mountroot_status=\"$?\""
+      print "        fi"
+      skip_mount_block = 0
+      next
+    }
+    skip_mount_block == 1 {
+      next
+    }
+    {
+      print
+    }
+  ' "$DESTDIR/scripts/local" > "$_recoverix_local_tmp" && \
+    cat "$_recoverix_local_tmp" > "$DESTDIR/scripts/local"
+  rm -f "$_recoverix_local_tmp"
+fi
+
+mkdir -p "$DESTDIR/etc/recoverix"
+for cfg in /etc/recoverix/runtime.conf /etc/recoverix/overlay-paths.conf; do
+  if [ -f "$cfg" ]; then
+    cp -a "$cfg" "$DESTDIR/etc/recoverix/" 2>/dev/null || true
+  fi
+done
+
+exit 0

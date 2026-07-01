@@ -1,0 +1,56 @@
+# Recoverix external menu GRUB (EFI/RecoveryBoot/grub.cfg on ESP)
+# RecoveryBoot is the first firmware entry. Default flow is Windows boot.
+# Pressing the configured hotkey at boot enters Recoverix from RECOVERY_LINUX.
+
+set timeout=@BOOT_TIMEOUT_SEC@
+set default=windows_boot_manager
+set timeout_style=hidden
+
+insmod part_gpt
+insmod part_msdos
+insmod fat
+insmod ext2
+insmod gzio
+insmod chain
+insmod search
+insmod search_fs_uuid
+
+menuentry "Windows Boot Manager" --id windows_boot_manager --class windows {
+    search --no-floppy --fs-uuid --set=esp @ESP_UUID@
+    set root=$esp
+    if [ -f /EFI/Microsoft/Boot/bootmgfw.efi ]; then
+        chainloader /EFI/Microsoft/Boot/bootmgfw.efi
+    else
+        echo "Windows Boot Manager not found on this ESP."
+        sleep 2
+    fi
+}
+
+menuentry "Recoverix Runtime" --id recoverix_runtime --class recoverix --hotkey=@RECOVERY_HOTKEY@ {
+    clear
+    search --no-floppy --fs-uuid --set=root @RECOVERY_UUID@
+    linux   /boot/recoverix/vmlinuz-@KERNEL_VERSION@ \
+        recoverix.root=1 \
+        recoverix.uuid=@RECOVERY_UUID@ \
+        recoverix.gui=1 \
+        recoverix.safe=1 \
+        root=tmpfs \
+        ro quiet loglevel=3 rd.udev.log_level=3 systemd.show_status=0 vt.global_cursor_default=0 \
+        systemd.mask=getty@tty1.service \
+        systemd.unit=multi-user.target
+    initrd  /boot/recoverix/initrd.img-@KERNEL_VERSION@-recoverix
+}
+
+menuentry "Recoverix Runtime (systemd debug)" --class recoverix {
+    echo "Starting Recoverix Runtime (systemd debug)..."
+    search --no-floppy --fs-uuid --set=root @RECOVERY_UUID@
+    linux   /boot/recoverix/vmlinuz-@KERNEL_VERSION@ \
+        recoverix.root=1 \
+        recoverix.uuid=@RECOVERY_UUID@ \
+        recoverix.debug.xorg=1 \
+        recoverix.safe=1 \
+        root=tmpfs \
+        ro systemd.unit=multi-user.target \
+        systemd.log_level=debug systemd.log_target=console systemd.show_status=1
+    initrd  /boot/recoverix/initrd.img-@KERNEL_VERSION@-recoverix
+}

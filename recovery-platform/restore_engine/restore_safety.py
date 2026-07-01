@@ -30,7 +30,11 @@ from restore_engine.confirmation import (
     require_confirmation_phrase,
     verify_confirmation_phrase,
 )
-from validation.image_validation import validate_restore
+from restore_engine.restore_planner import (
+    verify_compatible_target_disk,
+    verify_windows_target_geometry,
+)
+from validation.image_validation import validate_restore, validate_restore_compatible
 
 logger = get_logger(__name__)
 
@@ -58,7 +62,11 @@ class RestoreSafetyResult:
     apply: bool = False
     confirmed: bool = False
     phrase_verified: bool = False
-    target_disk: Dict[str, str] = field(default_factory=dict)
+    compatible_restore: bool = False
+    restore_mode: str = "standard"
+    partclone_no_check: bool = False
+    ntfs_post_resize_required: bool = False
+    target_disk: Dict[str, Any] = field(default_factory=dict)
     target_disk_display: List[str] = field(default_factory=list)
     checks: List[Dict[str, Any]] = field(default_factory=list)
     failure_reasons: List[str] = field(default_factory=list)
@@ -163,6 +171,8 @@ def check_incomplete_backup_marker(recovery_root: Path) -> RestoreSafetyCheck:
 def check_device_id_match(
     manifest: Dict[str, Any],
     disk: DiskMetadata,
+    *,
+    compatible_restore: bool = False,
 ) -> RestoreSafetyCheck:
     expected = manifest.get("device_id")
     actual = compute_device_id(disk)
@@ -178,6 +188,13 @@ def check_device_id_match(
             details=details,
         )
     if expected != actual:
+        if compatible_restore:
+            return RestoreSafetyCheck(
+                name="device_id",
+                passed=True,
+                reason="device mismatch accepted for compatible restore",
+                details={**details, "compatible_restore": True},
+            )
         return RestoreSafetyCheck(
             name="device_id",
             passed=False,
@@ -190,22 +207,46 @@ def check_device_id_match(
 def check_manifest_validation(
     recovery_root: Path,
     disk: DiskMetadata,
+    *,
+    compatible_restore: bool = False,
 ) -> RestoreSafetyCheck:
     try:
-        validation = validate_restore(recovery_root, disk)
+        validator = validate_restore_compatible if compatible_restore else validate_restore
+        validation = validator(recovery_root, disk)
     except Exception as exc:
-        logger.exception("validate_restore failed during safety gate")
+        logger.exception("restore validation failed during safety gate")
         return RestoreSafetyCheck(
-            name="validate_restore",
+            name="validate_restore_compatible" if compatible_restore else "validate_restore",
             passed=False,
             reason="validation_exception",
             details={"error": str(exc)},
         )
     return RestoreSafetyCheck(
-        name="validate_restore",
+        name="validate_restore_compatible" if compatible_restore else "validate_restore",
         passed=validation.allowed,
         reason=validation.reason,
         details=validation.to_dict(),
+    )
+
+
+def check_compatible_target_disk(
+    layout,
+    manifest: Dict[str, Any],
+    disk: DiskMetadata,
+    *,
+    recovery_root: Optional[Path] = None,
+) -> RestoreSafetyCheck:
+    check = verify_compatible_target_disk(
+        layout,
+        manifest,
+        disk,
+        recovery_root=recovery_root,
+    )
+    return RestoreSafetyCheck(
+        name=check.name,
+        passed=check.passed,
+        reason=check.reason,
+        details={**check.details, "planner_check": check.to_dict()},
     )
 
 
@@ -217,9 +258,14 @@ def _resolve_recovery_root() -> tuple[Optional[Path], Optional[str], Optional[An
     if not mount:
         return None, "RECOVERY_IMAGE must be mounted for restore safety checks", layout
     root = Path(mount)
-    manifest_path = root / MANIFEST_FILENAME
-    if not manifest_path.is_file():
-        return None, f"{MANIFEST_FILENAME} not found on mounted recovery image", layout
+    manifest_candidates = [
+        root / "manifests" / MANIFEST_FILENAME,
+        root / "metadata" / MANIFEST_FILENAME,
+        root / MANIFEST_FILENAME,
+    ]
+    manifest_path = next((p for p in manifest_candidates if p.is_file()), None)
+    if manifest_path is None:
+        return None, "recovery manifest not found on mounted recovery image", layout
     return root, None, layout
 
 
@@ -230,6 +276,7 @@ def evaluate_restore_safety(
     confirmation_phrase: Optional[str] = None,
     recovery_root: Optional[Path] = None,
     live: bool = True,
+    compatible_restore: bool = False,
 ) -> RestoreSafetyResult:
     """
     Run all restore safety checks (read-only except phrase verification).
@@ -266,6 +313,7 @@ def evaluate_restore_safety(
                 "device_id": "unknown",
             },
             target_disk_display=[],
+            compatible_restore=compatible_restore,
         )
 
     _record(is_recovery_runtime_environment())
@@ -282,6 +330,8 @@ def evaluate_restore_safety(
     )
     manifest_device_id: Optional[str] = None
     root = recovery_root
+    partclone_no_check = False
+    ntfs_post_resize_required = False
 
     if root is None:
         root, mount_reason, layout = _resolve_recovery_root()
@@ -303,8 +353,36 @@ def evaluate_restore_safety(
             try:
                 manifest = load_recovery_manifest(root)
                 manifest_device_id = manifest.get("device_id")
-                _record(check_device_id_match(manifest, disk))
-                _record(check_manifest_validation(root, disk))
+                _record(
+                    check_device_id_match(
+                        manifest,
+                        disk,
+                        compatible_restore=compatible_restore,
+                    )
+                )
+                _record(
+                    check_manifest_validation(
+                        root,
+                        disk,
+                        compatible_restore=compatible_restore,
+                    )
+                )
+                _record(verify_windows_target_geometry(layout, root))
+                if compatible_restore:
+                    compatible_check = check_compatible_target_disk(
+                        layout,
+                        manifest,
+                        disk,
+                        recovery_root=root,
+                    )
+                    if compatible_check.passed:
+                        partclone_no_check = bool(
+                            compatible_check.details.get("partclone_no_check_required")
+                        )
+                        ntfs_post_resize_required = bool(
+                            compatible_check.details.get("ntfs_post_resize_required")
+                        )
+                    _record(compatible_check)
             except Exception as exc:
                 logger.exception("manifest load failed during safety gate")
                 _record(
@@ -345,6 +423,9 @@ def evaluate_restore_safety(
         "disk_serial": disk.disk_serial,
         "disk_model": disk.disk_model,
         "device_id": compute_device_id(disk),
+        "restore_mode": "compatible" if compatible_restore else "standard",
+        "partclone_no_check": partclone_no_check,
+        "ntfs_post_resize_required": ntfs_post_resize_required,
     }
     if manifest_device_id is not None:
         target_disk["manifest_device_id"] = manifest_device_id
@@ -357,6 +438,9 @@ def evaluate_restore_safety(
         target_disk=target_disk,
         target_disk_display=display,
         phrase_verified=phrase_verified,
+        compatible_restore=compatible_restore,
+        partclone_no_check=partclone_no_check,
+        ntfs_post_resize_required=ntfs_post_resize_required,
     )
 
 
@@ -366,9 +450,12 @@ def _finalize(
     checks: List[RestoreSafetyCheck],
     failure_reasons: List[str],
     *,
-    target_disk: Dict[str, str],
+    target_disk: Dict[str, Any],
     target_disk_display: List[str],
     phrase_verified: bool = False,
+    compatible_restore: bool = False,
+    partclone_no_check: bool = False,
+    ntfs_post_resize_required: bool = False,
 ) -> RestoreSafetyResult:
     allowed = all(c.passed for c in checks) and apply and confirmed
     status = "PASS" if allowed else "REJECTED"
@@ -380,6 +467,10 @@ def _finalize(
         apply=apply,
         confirmed=confirmed,
         phrase_verified=phrase_verified,
+        compatible_restore=compatible_restore,
+        restore_mode="compatible" if compatible_restore else "standard",
+        partclone_no_check=partclone_no_check,
+        ntfs_post_resize_required=ntfs_post_resize_required,
         target_disk=target_disk,
         target_disk_display=target_disk_display,
         checks=[c.to_dict() for c in checks],
@@ -394,6 +485,7 @@ def authorize_restore_execution(
     confirmation_phrase: Optional[str] = None,
     recovery_root: Optional[Path] = None,
     live: bool = True,
+    compatible_restore: bool = False,
 ) -> RestoreSafetyResult:
     """
     Evaluate safety checks and raise when restore execution must not proceed.
@@ -411,6 +503,7 @@ def authorize_restore_execution(
         confirmation_phrase=confirmation_phrase,
         recovery_root=recovery_root,
         live=live,
+        compatible_restore=compatible_restore,
     )
 
     if result.allowed:

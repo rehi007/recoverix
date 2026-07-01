@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Recoverix Recovery UI
+Comment=Recoverix backup and restore interface (skeleton)
+Exec=/usr/local/sbin/recoverix-recovery-ui
+Terminal=false
+Categories=System;
+X-GNOME-Autostart-enabled=true
+OnlyShowIn=GNOME;Unity;XFCE;MATE;LXDE;Openbox;

@@ -8,11 +8,28 @@ PARTCLONE_NTFS = "partclone.ntfs"
 PARTCLONE_FAT = "partclone.fat"
 
 
-def format_partclone_ntfs_command(source_partition: str, output_image: Path) -> str:
+def format_partclone_ntfs_command(
+    source_partition: str,
+    output_image: Path,
+    *,
+    ignore_fschk: bool = False,
+) -> str:
     """Return partclone.ntfs backup command string."""
+    check_flag = " -I" if ignore_fschk else ""
     return (
-        f"{PARTCLONE_NTFS} -c -s {source_partition} -o {output_image}"
+        f"{PARTCLONE_NTFS}{check_flag} -c -s {source_partition} -o {output_image}"
     )
+
+
+def format_partclone_ntfs_domain_command(
+    source_partition: str,
+    output_domain: Path,
+    *,
+    ignore_fschk: bool = False,
+) -> str:
+    """Return partclone.ntfs used-block domain map command string."""
+    check_flag = " -I" if ignore_fschk else ""
+    return f"{PARTCLONE_NTFS}{check_flag} -D -s {source_partition} -o {output_domain}"
 
 
 def format_partclone_fat_command(source_partition: str, output_image: Path) -> str:

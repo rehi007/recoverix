@@ -1,0 +1,49 @@
+# Recoverix forensic limited sudo (staging — enabled at boot when recoverix.root=1 or recoverix.debug.xorg=1)
+# Installed to /etc/recoverix/staging/sudoers-recoverix-forensic; activated by recoverix-forensic-sudo-enable.
+# No general-purpose partition/disk write commands; destructive backup/restore
+# operations are only available via the dedicated recoverix-backup-admin helper.
+
+Defaults:recoverix !requiretty
+
+Cmnd_Alias RECOVERIX_FORENSIC_CAT = \
+    /bin/cat /var/log/recoverix-xorg.log, /usr/bin/cat /var/log/recoverix-xorg.log, \
+    /bin/cat /var/log/recoverix-gui.log, /usr/bin/cat /var/log/recoverix-gui.log, \
+    /bin/cat /var/log/*, /usr/bin/cat /var/log/*
+
+Cmnd_Alias RECOVERIX_FORENSIC_JOURNAL = \
+    /usr/bin/journalctl, /usr/bin/journalctl *
+
+Cmnd_Alias RECOVERIX_FORENSIC_SYSTEMCTL = \
+    /usr/bin/systemctl status, /usr/bin/systemctl status *, \
+    /usr/bin/systemctl show, /usr/bin/systemctl show *, \
+    /usr/bin/systemctl is-active, /usr/bin/systemctl is-active *, \
+    /usr/bin/systemctl list-units, /usr/bin/systemctl list-units *
+
+Cmnd_Alias RECOVERIX_FORENSIC_SESSION = \
+    /usr/bin/loginctl, /usr/bin/loginctl *
+
+Cmnd_Alias RECOVERIX_FORENSIC_PROC = \
+    /bin/ps, /bin/ps *, /usr/bin/ps, /usr/bin/ps *
+
+Cmnd_Alias RECOVERIX_FORENSIC_KERNEL = \
+    /bin/dmesg, /usr/bin/dmesg
+
+Cmnd_Alias RECOVERIX_FORENSIC_LS = \
+    /bin/ls /var/log, /bin/ls /var/log/*, /usr/bin/ls /var/log, /usr/bin/ls /var/log/*
+
+# NOPASSWD self-test only (no write/disk/restore)
+Cmnd_Alias RECOVERIX_FORENSIC_TRUE = /usr/bin/true, /bin/true
+
+Cmnd_Alias RECOVERIX_BACKUP_ADMIN = \
+    /usr/local/sbin/recoverix-backup-admin, \
+    /usr/local/sbin/recoverix-backup-admin *
+
+recoverix ALL=(root) NOPASSWD: RECOVERIX_FORENSIC_CAT
+recoverix ALL=(root) NOPASSWD: RECOVERIX_FORENSIC_JOURNAL
+recoverix ALL=(root) NOPASSWD: RECOVERIX_FORENSIC_SYSTEMCTL
+recoverix ALL=(root) NOPASSWD: RECOVERIX_FORENSIC_SESSION
+recoverix ALL=(root) NOPASSWD: RECOVERIX_FORENSIC_PROC
+recoverix ALL=(root) NOPASSWD: RECOVERIX_FORENSIC_KERNEL
+recoverix ALL=(root) NOPASSWD: RECOVERIX_FORENSIC_LS
+recoverix ALL=(root) NOPASSWD: RECOVERIX_FORENSIC_TRUE
+recoverix ALL=(root) NOPASSWD: RECOVERIX_BACKUP_ADMIN

@@ -14,11 +14,6 @@ from common.logger import get_logger, setup_logging
 logger = get_logger(__name__)
 
 _FWBOOTMGR = "{fwbootmgr}"
-_RECOVERY_CREATE_CMD = (
-    'bcdedit /create /d "RecoveryBoot" /application bootapp '
-    "/path \\EFI\\RecoveryBoot\\shimx64.efi"
-)
-
 
 @dataclass(frozen=True)
 class BootOrderPlan:
@@ -59,13 +54,16 @@ def _current_positions(
     return recovery_pos, windows_pos
 
 
+RECOVERIX_BOOT_MANAGER_LABEL = "Recoverix Boot Manager"
+
+
 def build_target_boot_order(
     *,
     recovery_id: Optional[str],
     windows_id: str,
     current_order: List[str],
 ) -> List[str]:
-    """Place RecoveryBoot first, Windows Boot Manager second, preserve others."""
+    """Place Recoverix Boot Manager first, Windows Boot Manager second, preserve others."""
     remaining = [
         identifier
         for identifier in current_order
@@ -91,7 +89,7 @@ def plan_bootorder_recovery(
     dry_run: bool = True,
 ) -> BootOrderPlan:
     """
-    Build a dry-run plan to prioritize RecoveryBoot first and Windows second.
+    Build a dry-run plan to prioritize Recoverix Boot Manager first and Windows second.
 
     Does not execute bcdedit or modify EFI / BootNext.
     """
@@ -130,9 +128,29 @@ def plan_bootorder_recovery(
     commands: List[str] = []
 
     if create_required:
-        planned_actions.append("create RecoveryBoot entry")
-        commands.append(_RECOVERY_CREATE_CMD)
-        logger.info("plan: RecoveryBoot entry creation required")
+        logger.error(
+            "%s entry missing; bcdedit creation disabled pending native NVRAM writer",
+            RECOVERIX_BOOT_MANAGER_LABEL,
+        )
+        return BootOrderPlan(
+            action_required=False,
+            planned_actions=[f"{RECOVERIX_BOOT_MANAGER_LABEL} entry missing; native NVRAM writer required"],
+            commands=[],
+            dry_run=dry_run,
+            status="FAIL",
+            create_required=True,
+            reorder_required=False,
+            boot_next_policy="preserve",
+            target_boot_order=build_target_boot_order(
+                recovery_id=None,
+                windows_id=windows_id,
+                current_order=analysis.boot_order,
+            ),
+            reason=(
+                f"{RECOVERIX_BOOT_MANAGER_LABEL} creation via bcdedit is disabled; "
+                "native UEFI NVRAM writer required"
+            ),
+        )
 
     target_order = build_target_boot_order(
         recovery_id=recovery_id,
@@ -148,7 +166,7 @@ def plan_bootorder_recovery(
         )
 
     if reorder_required:
-        planned_actions.append("set RecoveryBoot first")
+        planned_actions.append(f"set {RECOVERIX_BOOT_MANAGER_LABEL} first")
         planned_actions.append("set Windows Boot Manager second")
         commands.append(format_displayorder_command(target_order))
         logger.info("plan: BootOrder reorder required -> %s", target_order)

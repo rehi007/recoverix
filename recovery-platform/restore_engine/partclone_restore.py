@@ -10,7 +10,12 @@ PARTCLONE_FAT = "partclone.fat"
 BOOTMGFW_EFI_PATH = "EFI/Microsoft/Boot/bootmgfw.efi"
 
 
-def format_partclone_ntfs_restore_command(image: Path, target_partition: str) -> str:
+def format_partclone_ntfs_restore_command(
+    image: Path,
+    target_partition: str,
+    *,
+    no_check: bool = False,
+) -> str:
     """Return partclone.ntfs restore command string (not executed)."""
     return f"{PARTCLONE_NTFS} -r -s {image} -o {target_partition}"
 

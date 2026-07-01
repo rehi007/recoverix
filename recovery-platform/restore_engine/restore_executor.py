@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import shlex
 import shutil
+import subprocess
 import sys
+import re
+import threading
+import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from backup_engine.backup_planner import discover_layout
 from backup_engine.backup_state import DEFAULT_IMAGE_FILES
@@ -37,9 +42,17 @@ from restore_engine.restore_state import (
     mark_restore_success,
 )
 from rollback.failure_counter import record_restore_failure_state
-from validation.image_validation import validate_restore
+from validation.image_validation import (
+    validate_restore,
+    validate_restore_compatible,
+    validate_restore_compatible_quick,
+    validate_restore_quick,
+)
 
 logger = get_logger(__name__)
+
+ProgressCallback = Callable[[Dict[str, Any]], None]
+PARTCLONE_PROGRESS_RE = re.compile(r"(?P<percent>\d+(?:\.\d+)?)\s*%")
 
 from restore_engine.restore_paths import EFI_SNAPSHOT_DIR, GPT_SNAPSHOT_FILE, PRE_RESTORE_DIR
 
@@ -64,6 +77,8 @@ class RestoreExecutionContext:
     disk: DiskMetadata
     confirmed: bool = True
     runtime_state: Optional[RuntimeState] = None
+    progress_callback: Optional[ProgressCallback] = None
+    prevalidated: bool = False
 
 
 @dataclass
@@ -123,6 +138,7 @@ class RestoreExecutor:
         self._operations: List[str] = []
         self._logs = RestoreLogWriter(ctx.recovery_root)
         self._runtime = ctx.runtime_state
+        self._progress_callback = ctx.progress_callback
         self._efi_mount: Optional[Path] = None
         self._forbidden_targets = self._protected_partition_paths()
 
@@ -155,6 +171,132 @@ class RestoreExecutor:
     def _log(self, filename: str, message: str) -> None:
         self._logs.append(filename, message)
         logger.info("[%s] %s", filename, message)
+
+    def _emit_progress(
+        self,
+        *,
+        stage: str,
+        percent: int,
+        message: str,
+        final: bool = False,
+    ) -> None:
+        if self._progress_callback is None:
+            return
+        payload: Dict[str, Any] = {
+            "stage": stage,
+            "percent": max(0, min(100, int(percent))),
+            "message": message,
+            "detail": message,
+        }
+        if final:
+            payload["final"] = True
+        self._progress_callback(payload)
+
+    @contextmanager
+    def _progress_heartbeat(
+        self,
+        *,
+        stage: str,
+        start_percent: int,
+        end_percent: int,
+        message: str,
+        interval: float = 2.0,
+    ) -> Iterator[None]:
+        if self._progress_callback is None:
+            yield
+            return
+
+        stop = threading.Event()
+
+        def _run() -> None:
+            percent = start_percent
+            while not stop.is_set():
+                self._emit_progress(stage=stage, percent=percent, message=message)
+                percent = min(end_percent, percent + 1)
+                stop.wait(interval)
+
+        worker = threading.Thread(target=_run, daemon=True)
+        worker.start()
+        try:
+            yield
+        finally:
+            stop.set()
+            worker.join(timeout=interval)
+
+    @staticmethod
+    def _extract_partclone_percent(text: str) -> Optional[int]:
+        matches = list(PARTCLONE_PROGRESS_RE.finditer(text))
+        if not matches:
+            return None
+        try:
+            value = float(matches[-1].group("percent"))
+        except ValueError:
+            return None
+        return max(0, min(100, int(round(value))))
+
+    def _run_confirmed_streaming_partclone(
+        self,
+        command: str,
+        *,
+        operation: str,
+        progress_start: int,
+        progress_end: int,
+        message: str,
+    ) -> None:
+        self._assert_authorized(operation)
+        argv = shlex.split(command)
+        target = argv[-1] if argv else ""
+        self._assert_target_allowed(target, operation)
+
+        process = subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=0,
+        )
+        assert process.stdout is not None
+        output_parts: List[str] = []
+        pending = ""
+        last_percent: Optional[int] = None
+        last_emit = 0.0
+
+        while True:
+            char = process.stdout.read(1)
+            if char == "" and process.poll() is not None:
+                break
+            if char == "":
+                continue
+            output_parts.append(char)
+            if char in "\r\n":
+                candidate = pending
+                pending = ""
+            else:
+                pending += char
+                candidate = pending
+
+            parsed = self._extract_partclone_percent(candidate)
+            now = time.monotonic()
+            if parsed is None:
+                continue
+            if parsed == last_percent and now - last_emit < 1.0:
+                continue
+            span = max(1, progress_end - progress_start)
+            display = progress_start + int((parsed * span) / 100)
+            self._emit_progress(
+                stage=operation,
+                percent=display,
+                message=message,
+            )
+            last_percent = parsed
+            last_emit = now
+
+        returncode = process.wait()
+        output = "".join(output_parts).strip()
+        self._operations.append(command)
+        if returncode != 0:
+            raise RuntimeError(f"{operation} failed (rc={returncode}): {output}")
+        self._emit_progress(stage=operation, percent=progress_end, message=message)
 
     def _fail(self, stage: str, reason: str) -> RestoreExecutionResult:
         self._log("error.log", f"{stage}: {reason}")
@@ -190,35 +332,75 @@ class RestoreExecutor:
                 f"{operation} failed (rc={result.returncode}): {result.stderr.strip()}"
             )
 
+    @staticmethod
+    def _command_detail(result: Any, label: str) -> str:
+        detail = (getattr(result, "stderr", "") or getattr(result, "stdout", "") or "").strip()
+        return f"{label} failed (rc={getattr(result, 'returncode', 'unknown')}): {detail}"
+
     def execute(self) -> RestoreExecutionResult:
         """Run the full destructive restore pipeline."""
         self._assert_authorized("restore_pipeline")
-        validation = validate_restore(self._recovery_root, self._disk)
-        if not validation.allowed:
-            return self._fail(
-                "pre_restore_validation",
-                validation.reason or "validate_restore failed",
-            )
 
         try:
+            self._emit_progress(stage="pre_restore_validation", percent=20, message="Checking restore readiness")
+            compatible_restore = bool(getattr(self._ctx.safety, "compatible_restore", False))
+            if compatible_restore:
+                validation = (
+                    validate_restore_compatible_quick(self._recovery_root, self._disk)
+                    if self._ctx.prevalidated
+                    else validate_restore_compatible(self._recovery_root, self._disk)
+                )
+            else:
+                validation = (
+                    validate_restore_quick(self._recovery_root, self._disk)
+                    if self._ctx.prevalidated
+                    else validate_restore(self._recovery_root, self._disk)
+                )
+            if not validation.allowed:
+                return self._fail(
+                    "pre_restore_validation",
+                    validation.reason or "validate_restore failed",
+                )
+            self._emit_progress(stage="pre_restore_validation", percent=22, message="Restore readiness verified")
             self._stage_backup_efi()
+            self._emit_progress(stage="efi_backup", percent=25, message="Backing up EFI safety files")
             self._stage_backup_gpt()
+            self._emit_progress(stage="gpt_backup", percent=28, message="Backing up GPT metadata")
             mark_restore_started(self._recovery_root)
             self._operations.append("restore_in_progress=true")
             self._stage_ensure_windows_unmounted()
+            self._emit_progress(stage="windows_unmount", percent=30, message="Preparing Windows partition")
             self._stage_partclone_windows()
-            self._stage_restore_recovery_boot_efi()
-            self._stage_verify_windows_boot_manager()
-            self._stage_repair_bootorder()
-            mark_restore_success(self._recovery_root)
-            self._stage_log_integrity()
+            self._emit_progress(stage="windows_restore", percent=90, message="Windows partition restored")
+            with self._progress_heartbeat(
+                stage="restore_finalize",
+                start_percent=91,
+                end_percent=98,
+                message="Finalizing system restore",
+                interval=4.0,
+            ):
+                self._stage_restore_recovery_boot_efi()
+                self._emit_progress(stage="efi_restore", percent=92, message="Restoring RecoveryBoot EFI files")
+                self._stage_verify_windows_boot_manager()
+                self._emit_progress(stage="boot_verify", percent=95, message="Verifying Windows Boot Manager")
+                self._stage_repair_bootorder()
+                self._emit_progress(stage="bootorder", percent=98, message="Checking RecoveryBoot order")
+                mark_restore_success(self._recovery_root)
+                self._stage_log_integrity()
             if self._runtime is not None:
                 self._runtime.restore_enabled = True
                 self._runtime.last_message = "restore completed"
             self._log("restore.log", "restore completed successfully")
+            self._emit_progress(
+                stage="complete",
+                percent=100,
+                message="System restore completed.",
+                final=True,
+            )
             return RestoreExecutionResult(
                 status="COMPLETED",
                 success=True,
+                reason=None,
                 current_stage="restore_complete",
                 rollback_required=False,
                 operations=list(self._operations),
@@ -293,7 +475,13 @@ class RestoreExecutor:
         windows = self._layout.windows.path
         cmd = format_partclone_ntfs_restore_command(image, windows)
         self._log("restore.log", f"stage: {cmd}")
-        self._run_confirmed(cmd, operation="windows_partclone_restore")
+        self._run_confirmed_streaming_partclone(
+            cmd,
+            operation="windows_partclone_restore",
+            progress_start=30,
+            progress_end=90,
+            message="Restoring Windows partition",
+        )
 
     def _stage_restore_recovery_boot_efi(self) -> None:
         self._assert_authorized("efi_recovery_boot_restore")
@@ -367,10 +555,21 @@ class RestoreExecutor:
         self._assert_target_allowed(efi_path, "efi_mount")
         existing = _find_efi_mount(efi_path)
         if existing is not None:
-            self._efi_mount = existing
-            return existing
+            if read_only:
+                self._efi_mount = existing
+                return existing
+            result = run_command(
+                ["umount", str(existing)],
+                dry_run=False,
+                confirmed=self._confirmed,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"EFI unmount failed: {result.stderr.strip()}")
+            self._operations.append(f"umount {existing}")
+            mountpoint = existing
+        else:
+            mountpoint = mount_point_for_label("ESP_RESTORE")
 
-        mountpoint = mount_point_for_label("ESP_RESTORE")
         mountpoint.mkdir(parents=True, exist_ok=True)
         opts = "ro" if read_only else "rw"
         result = run_command(
@@ -403,6 +602,8 @@ def build_execution_context(
     confirmed: bool,
     recovery_root: Optional[Path] = None,
     runtime_state: Optional[RuntimeState] = None,
+    progress_callback: Optional[ProgressCallback] = None,
+    prevalidated: bool = False,
 ) -> RestoreExecutionContext:
     """Resolve layout and disk metadata after successful authorization."""
     if not safety.allowed:
@@ -426,4 +627,6 @@ def build_execution_context(
         disk=disk,
         confirmed=confirmed,
         runtime_state=runtime_state,
+        progress_callback=progress_callback,
+        prevalidated=prevalidated,
     )

@@ -52,7 +52,7 @@ class RuntimeState:
         if self.persisted and self.persisted.current_stage:
             lines.append(f"Stage          : {self.persisted.current_stage}")
         if self.last_message:
-            lines.append(f"Last message   : {self.last_message}")
+            lines.append(f"Last message   : {self._summary_message(self.last_message)}")
         return lines
 
     @staticmethod
@@ -61,6 +61,20 @@ class RuntimeState:
             return "not found"
         mount = volume.mountpoint or "(unmounted)"
         return f"{volume.path} label={volume.label!r} mount={mount}"
+
+    @staticmethod
+    def _summary_message(message: str) -> str:
+        first_line = next(
+            (
+                line.strip()
+                for line in message.splitlines()
+                if line.strip() and not set(line.strip()) <= {"=", "-"}
+            ),
+            "",
+        )
+        if not first_line:
+            return ""
+        return first_line if len(first_line) <= 60 else f"{first_line[:57]}..."
 
 
 def apply_persisted_recovery_state(

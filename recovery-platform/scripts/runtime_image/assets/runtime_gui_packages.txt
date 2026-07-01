@@ -1,0 +1,25 @@
+# Recoverix Runtime GUI session stack (Ubuntu 22.04 jammy).
+# Installed via recoverix_runtime_apt_install (strict minimal, one-by-one).
+# Target boot path: graphical.target -> gdm3 -> openbox (xsessions) -> Recovery UI autostart.
+# Install order (runtime_install_gui_stack_packages): openbox FIRST, then gdm3 (openbox Provides
+# x-session-manager for gdm3 Depends OR — avoids forbidden ubuntu-session).
+# gdm3 is installed via recoverix_runtime_apt_install_gdm3 (jammy hard-deps allowlist).
+# openbox-session package does not exist on jammy — use openbox + /usr/share/xsessions/openbox.desktop.
+
+xorg
+xserver-xorg
+xserver-xorg-legacy
+xserver-xorg-input-libinput
+xserver-xorg-video-amdgpu
+xserver-xorg-video-fbdev
+openbox
+xinit
+xauth
+dbus-x11
+policykit-1
+network-manager
+mesa-utils
+x11-xserver-utils
+
+# Optional fallback greeter assets (skipped if simulate pulls lightdm):
+# lightdm-gtk-greeter

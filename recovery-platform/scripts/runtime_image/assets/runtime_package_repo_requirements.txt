@@ -1,0 +1,3 @@
+# Packages that require a specific apt component in the runtime rootfs (not on build host).
+# Format: SUITE PKG COMPONENT [# comment]
+jammy partclone universe  # partclone is in Ubuntu universe

@@ -27,6 +27,8 @@ Recovery Runtime은 **Linux 전용** 복구 세션에서 동작하는 에이전�
 
 OS 루트 이미지는 **읽기 중심(immutable)** 배포를 목표로 하고, 가변 데이터는 **RECOVERY_IMAGE** 쪽에만 기록합니다 ([`README.md`](README.md)).
 
+이미지 빌드 파이프라인(squashfs + overlay initramfs, **호스트 부트 미변경**): [`IMMUTABLE_RUNTIME_BUILD.md`](IMMUTABLE_RUNTIME_BUILD.md) · `scripts/runtime_image/`
+
 ## 관련 문서
 
 [`RESTORE.md`](RESTORE.md) · [`FAILURE_RECOVERY.md`](FAILURE_RECOVERY.md) · [`BACKUP.md`](BACKUP.md)

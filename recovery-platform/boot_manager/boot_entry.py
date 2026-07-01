@@ -8,16 +8,41 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
 WINDOWS_BOOT_DESCRIPTION = "windows boot manager"
+WINDOWS_BOOT_DESCRIPTION_KO = "windows 부팅 관리자"
 WINDOWS_BOOT_PATH_FRAGMENT = r"efi/microsoft/boot/bootmgfw.efi"
 
-RECOVERY_BOOT_DESCRIPTION = "recoveryboot"
+RECOVERY_BOOT_DESCRIPTION = "recoverix boot manager"
+LEGACY_RECOVERY_BOOT_DESCRIPTION = "recoveryboot"
 RECOVERY_BOOT_PATH_FRAGMENT = r"efi/recoveryboot/shimx64.efi"
 
 _SECTION_FIRMWARE_MANAGER = re.compile(r"^Firmware Boot Manager\s*$", re.IGNORECASE)
 _SECTION_FIRMWARE_LOADER = re.compile(r"^Firmware Boot Loader\s*$", re.IGNORECASE)
-_LINE_KV = re.compile(r"^([A-Za-z]+)\s{2,}(.*\S)\s*$")
+_SECTION_FIRMWARE_MANAGER_KO = re.compile(r"^펌웨어\s+부팅\s+관리자\s*$")
+_SECTION_FIRMWARE_LOADER_KO = re.compile(r"^펌웨어\s+.+$")
+_SECTION_WINDOWS_BOOT_MANAGER = re.compile(r"^Windows Boot Manager\s*$", re.IGNORECASE)
+_SECTION_WINDOWS_BOOT_MANAGER_KO = re.compile(r"^Windows\s+부팅\s+관리자\s*$", re.IGNORECASE)
+_LINE_KV = re.compile(r"^(\S(?:.*?\S)?)\s{2,}(.*\S)\s*$")
 _LINE_CONTINUATION = re.compile(r"^\s{2,}(\{.+?\})\s*$")
 _IDENTIFIER = re.compile(r"^\{(.+?)\}$", re.IGNORECASE)
+
+_KEY_ALIASES = {
+    "identifier": "identifier",
+    "식별자": "identifier",
+    "description": "description",
+    "설명": "description",
+    "device": "device",
+    "장치": "device",
+    "path": "path",
+    "경로": "path",
+    "displayorder": "displayorder",
+    "display order": "displayorder",
+    "표시 순서": "displayorder",
+    "표시순서": "displayorder",
+    "bootnext": "bootnext",
+    "boot next": "bootnext",
+    "다음 부팅": "bootnext",
+    "다음부팅": "bootnext",
+}
 
 
 @dataclass(frozen=True)
@@ -98,13 +123,22 @@ def _split_sections(text: str) -> List[tuple[str, List[str]]]:
 
     for raw_line in text.splitlines():
         line = raw_line.rstrip()
-        if _SECTION_FIRMWARE_MANAGER.match(line):
+        if _SECTION_FIRMWARE_MANAGER.match(line) or _SECTION_FIRMWARE_MANAGER_KO.match(line):
             if current_lines:
                 sections.append((current_title, current_lines))
             current_title = "manager"
             current_lines = []
             continue
-        if _SECTION_FIRMWARE_LOADER.match(line):
+        if _SECTION_WINDOWS_BOOT_MANAGER.match(line) or _SECTION_WINDOWS_BOOT_MANAGER_KO.match(line):
+            if current_lines:
+                sections.append((current_title, current_lines))
+            current_title = "loader"
+            current_lines = ["description              Windows Boot Manager"]
+            continue
+        if _SECTION_FIRMWARE_LOADER.match(line) or (
+            _SECTION_FIRMWARE_LOADER_KO.match(line)
+            and not _SECTION_FIRMWARE_MANAGER_KO.match(line)
+        ):
             if current_lines:
                 sections.append((current_title, current_lines))
             current_title = "loader"
@@ -117,6 +151,11 @@ def _split_sections(text: str) -> List[tuple[str, List[str]]]:
     if current_lines:
         sections.append((current_title, current_lines))
     return sections
+
+
+def _canonical_key(raw_key: str) -> str:
+    key = " ".join(raw_key.strip().lower().split())
+    return _KEY_ALIASES.get(key, key)
 
 
 def _parse_block(lines: List[str]) -> Dict[str, Any]:
@@ -138,7 +177,7 @@ def _parse_block(lines: List[str]) -> Dict[str, Any]:
         if not match:
             continue
 
-        key = match.group(1).lower()
+        key = _canonical_key(match.group(1))
         value = match.group(2).strip()
         current_key = key
 
@@ -160,7 +199,8 @@ def parse_bcdedit_firmware(text: str) -> tuple[List[BootEntry], List[str], Optio
     boot_order: List[str] = []
     boot_next: Optional[str] = None
 
-    for title, lines in _split_sections(text):
+    sections = _split_sections(text)
+    for title, lines in sections:
         block = _parse_block(lines)
         if title == "manager":
             order = block.get("displayorder")
@@ -209,17 +249,25 @@ def _is_windows_boot_manager(entry: BootEntry) -> bool:
     description = (entry.description or "").lower()
     path = _normalize_path(entry.path)
     path_ok = WINDOWS_BOOT_PATH_FRAGMENT in path
-    desc_ok = WINDOWS_BOOT_DESCRIPTION in description
+    desc_ok = (
+        WINDOWS_BOOT_DESCRIPTION in description
+        or WINDOWS_BOOT_DESCRIPTION_KO in description
+    )
     return path_ok or desc_ok
 
 
 def _is_recovery_boot(entry: BootEntry) -> bool:
-    """Match RecoveryBoot shim path and/or RecoveryBoot description."""
+    """Match Recoverix Boot Manager shim path and/or supported descriptions."""
     description = (entry.description or "").lower()
     path = _normalize_path(entry.path)
     path_ok = RECOVERY_BOOT_PATH_FRAGMENT in path
-    desc_ok = RECOVERY_BOOT_DESCRIPTION in description
-    return path_ok or desc_ok
+    desc_ok = (
+        RECOVERY_BOOT_DESCRIPTION in description
+        or LEGACY_RECOVERY_BOOT_DESCRIPTION in description
+    )
+    if path:
+        return path_ok
+    return desc_ok
 
 
 def analyze_firmware_output(text: str, *, dry_run: bool = False) -> FirmwareAnalysisResult:

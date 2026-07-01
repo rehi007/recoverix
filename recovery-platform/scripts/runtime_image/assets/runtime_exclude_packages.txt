@@ -1,0 +1,17 @@
+# Runtime rootfs purity — desktop metapackages / bloat (same policy as runtime_desktop_environment_forbidden.txt).
+# Display-manager chain: assets/runtime_gdm3_allowed_dependencies.txt
+
+ubuntu-desktop
+ubuntu-desktop-minimal
+ubuntu-session
+kubuntu-desktop
+xubuntu-desktop
+lubuntu-desktop
+task-desktop
+task-gnome-desktop
+libreoffice*
+thunderbird
+snapd
+gnome-control-center
+gnome-tour
+gnome-session

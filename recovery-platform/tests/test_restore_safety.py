@@ -21,6 +21,7 @@ from restore_engine.confirmation import (
     require_confirmation_phrase,
     verify_confirmation_phrase,
 )
+from restore_engine.restore_planner import RestoreCheckResult
 
 
 def _disk() -> DiskMetadata:
@@ -71,8 +72,8 @@ def _layout(mount: str) -> _DiscoveredLayout:
 def _populate_backup(root: Path) -> None:
     files = {
         "metadata/gpt_backup.bin": b"gpt",
-        "images/efi.pcl": b"efi",
-        "images/system.pcl": b"win",
+        "images/efi_backup.pcl": b"efi",
+        "images/windows_backup.pcl": b"win",
     }
     for relative, content in files.items():
         path = root / relative
@@ -86,6 +87,27 @@ def _runtime_ok():
         name="recovery_runtime",
         passed=True,
         details={"recovery_linux_found": True},
+    )
+
+
+def _compatible_target_ok() -> RestoreCheckResult:
+    return RestoreCheckResult(
+        name="compatible_target_disk",
+        passed=True,
+        status="COMPATIBLE",
+        reason="target disk accepted for compatible restore",
+        details={
+            "partclone_no_check_required": False,
+            "ntfs_post_resize_required": False,
+        },
+    )
+
+
+def _geometry_ok() -> RestoreCheckResult:
+    return RestoreCheckResult(
+        name="windows_target_geometry",
+        passed=True,
+        status="PASS",
     )
 
 
@@ -261,6 +283,46 @@ def test_validate_restore_failure_rejected(_mock_bl, _mock_rt):
 
 @patch.object(safety_mod, "is_recovery_runtime_environment", return_value=_runtime_ok())
 @patch.object(safety_mod, "read_bitlocker_state", return_value="OFF")
+def test_compatible_restore_authorizes_device_mismatch(_mock_bl, _mock_rt):
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _populate_backup(root)
+        layout = _layout(str(root))
+        replacement_disk = DiskMetadata(
+            disk_guid="{99999999-9999-9999-9999-999999999999}",
+            disk_model="Replacement",
+            disk_serial="REPLACED",
+            disk_size=1_000_000_000_000,
+            windows_partition_uuid="{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}",
+            efi_partition_uuid="{bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb}",
+            )
+        with patch.object(safety_mod, "discover_layout", return_value=(None, layout)):
+            with patch.object(safety_mod, "build_disk_metadata", return_value=replacement_disk):
+                with patch.object(Path, "exists", return_value=True):
+                    with patch.object(
+                        safety_mod,
+                        "verify_windows_target_geometry",
+                        return_value=_geometry_ok(),
+                    ):
+                        with patch.object(
+                            safety_mod,
+                            "verify_compatible_target_disk",
+                            return_value=_compatible_target_ok(),
+                        ):
+                            result = safety_mod.authorize_restore_execution(
+                                apply=True,
+                                confirmed=True,
+                                confirmation_phrase=RESTORE_CONFIRMATION_PHRASE,
+                                recovery_root=root,
+                                compatible_restore=True,
+                            )
+    assert result.allowed is True
+    assert result.compatible_restore is True
+    assert result.restore_mode == "compatible"
+
+
+@patch.object(safety_mod, "is_recovery_runtime_environment", return_value=_runtime_ok())
+@patch.object(safety_mod, "read_bitlocker_state", return_value="OFF")
 def test_all_checks_pass_authorized(_mock_bl, _mock_rt):
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -268,12 +330,17 @@ def test_all_checks_pass_authorized(_mock_bl, _mock_rt):
         layout = _layout(str(root))
         with patch.object(safety_mod, "discover_layout", return_value=(None, layout)):
             with patch.object(safety_mod, "build_disk_metadata", return_value=_disk()):
-                result = safety_mod.authorize_restore_execution(
-                    apply=True,
-                    confirmed=True,
-                    confirmation_phrase=RESTORE_CONFIRMATION_PHRASE,
-                    recovery_root=root,
-                )
+                with patch.object(
+                    safety_mod,
+                    "verify_windows_target_geometry",
+                    return_value=_geometry_ok(),
+                ):
+                    result = safety_mod.authorize_restore_execution(
+                        apply=True,
+                        confirmed=True,
+                        confirmation_phrase=RESTORE_CONFIRMATION_PHRASE,
+                        recovery_root=root,
+                    )
     assert result.allowed is True
     assert result.phrase_verified is True
     assert result.target_disk["disk_guid"] == _disk().disk_guid

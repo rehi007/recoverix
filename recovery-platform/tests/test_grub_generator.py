@@ -21,12 +21,13 @@ def test_normalize_efi_path():
 
 def test_generate_default_windows_first():
     content = generate_grub_config()
-    assert "set timeout=5" in content
+    assert "set timeout=2" in content
     assert "set default=0" in content
+    assert "set timeout_style=hidden" in content
     assert 'menuentry "Windows Boot Manager"' in content
     assert "search --file --no-floppy --set=root /EFI/Microsoft/Boot/bootmgfw.efi" in content
     assert "chainloader /EFI/Microsoft/Boot/bootmgfw.efi" in content
-    assert '--hotkey=f5' in content
+    assert '--hotkey=q' in content
     assert "linux /recovery/vmlinuz quiet recovery_mode=1" in content
     assert "initrd /recovery/initrd.img" in content
 
@@ -50,7 +51,7 @@ def test_configurable_recovery_paths():
 
 def test_keystatus_optional_load():
     content = generate_grub_config()
-    assert "insmod keystatus || true" in content
+    assert "insmod keystatus || true" not in content
 
 
 def test_no_crlf_line_endings_in_generated_content():
@@ -95,4 +96,4 @@ def test_cli_generation(tmp_path=None):
         code = main(["--output", str(output)])
         assert code == 0
         assert output.exists()
-        assert "set timeout=5" in output.read_text(encoding="utf-8")
+        assert "set timeout=2" in output.read_text(encoding="utf-8")

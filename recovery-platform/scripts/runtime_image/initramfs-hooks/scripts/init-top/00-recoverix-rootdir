@@ -1,0 +1,11 @@
+#!/bin/sh
+# Ensure /root exists before initramfs mountroot handles root=tmpfs.
+
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case $1 in
+  prereqs) prereqs; exit 0 ;;
+esac
+
+mkdir -p /root
+exit 0

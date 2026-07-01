@@ -80,7 +80,7 @@ class NtfsUsedEstimationTests(unittest.TestCase):
         self.assertNotIn("-m", argv0)
 
     @patch("backup_engine.space_estimation.run_readonly")
-    def test_ntfs_partition_fallback_warns(self, mock_ro):
+    def test_ntfs_probe_failure_refuses_partition_size_fallback(self, mock_ro):
         mock_ro.return_value = MagicMock(returncode=1, stdout="", stderr="")
         with patch("backup_engine.space_estimation.shutil.which", return_value=None):
             used, method, warn, _details = estimate_ntfs_used_bytes(
@@ -88,10 +88,10 @@ class NtfsUsedEstimationTests(unittest.TestCase):
                 mountpoint=None,
                 partition_size=383 * 1024**3,
             )
-        self.assertEqual(method, "partition_size_fallback")
+        self.assertEqual(method, "ntfs_usage_unavailable")
         self.assertIsNotNone(warn)
-        self.assertIn("fallback", warn.lower())
-        self.assertEqual(used, 383 * 1024**3)
+        self.assertIn("refusing", warn.lower())
+        self.assertEqual(used, 0)
 
 
 class BackupSpaceAggregateTests(unittest.TestCase):
@@ -106,6 +106,10 @@ class BackupSpaceAggregateTests(unittest.TestCase):
         self.assertEqual(est.estimated_used_bytes, 49 * 1024**3)
         self.assertEqual(est.estimation_method, "ntfs_used_space")
         self.assertLess(est.estimated_required_gb, 60)
+        self.assertEqual(
+            est.estimation_details["windows_required_bytes"],
+            int(49 * 1024**3 * 1.20),
+        )
 
     @patch("backup_engine.space_estimation.estimate_recovery_image_free_bytes", return_value=500 * 1024**3)
     @patch("backup_engine.space_estimation.estimate_ntfs_used_bytes")
@@ -116,6 +120,23 @@ class BackupSpaceAggregateTests(unittest.TestCase):
         self.assertTrue(est.can_backup)
         self.assertLess(est.estimated_required_bytes, 383 * 1024**3)
         self.assertEqual(est.estimated_used_bytes, 49 * 1024**3)
+
+    @patch("backup_engine.space_estimation.estimate_recovery_image_free_bytes", return_value=500 * 1024**3)
+    @patch("backup_engine.space_estimation.estimate_ntfs_used_bytes")
+    @patch("backup_engine.space_estimation.estimate_efi_backup_bytes", return_value=200 * 1024**2)
+    def test_unavailable_ntfs_usage_blocks_backup(self, _efi, mock_ntfs, _free):
+        warning = "NTFS used-space probes failed; refusing to estimate from full Windows partition size"
+        mock_ntfs.return_value = (
+            0,
+            "ntfs_usage_unavailable",
+            warning,
+            {"probes": [], "selected_method": "ntfs_usage_unavailable"},
+        )
+        est = estimate_backup_space(_layout(windows_size=383 * 1024**3))
+        self.assertFalse(est.can_backup)
+        self.assertEqual(est.reason, warning)
+        self.assertEqual(est.estimated_required_bytes, 200 * 1024**2 + 1024 * 1024)
+        self.assertEqual(est.estimation_method, "ntfs_usage_unavailable")
 
 
 class RecoveryFreeSpaceTests(unittest.TestCase):

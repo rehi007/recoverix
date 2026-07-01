@@ -14,6 +14,7 @@ from restore_engine.restore_planner import (
     build_planned_commands,
     build_restore_plan,
     main,
+    verify_compatible_target_disk,
     verify_recovery_image_accessible,
     verify_target_disk,
     verify_windows_boot_manager,
@@ -68,8 +69,8 @@ def _disk() -> DiskMetadata:
 def _populate_backup(root: Path) -> None:
     files = {
         "metadata/gpt_backup.bin": b"gpt-data",
-        "images/efi.pcl": b"efi-image",
-        "images/system.pcl": b"windows-image",
+        "images/efi_backup.pcl": b"efi-image",
+        "images/windows_backup.pcl": b"windows-image",
     }
     for relative, content in files.items():
         path = root / relative
@@ -77,6 +78,33 @@ def _populate_backup(root: Path) -> None:
         path.write_bytes(content)
     ctx = ManifestContext(recovery_root=root, disk=_disk())
     finalize_backup_manifest(ctx)
+
+
+def _bootmgr_planned() -> RestoreCheckResult:
+    return RestoreCheckResult(
+        name="windows_boot_manager",
+        passed=True,
+        status="PLANNED",
+    )
+
+
+def _geometry_check(
+    *,
+    source_size: int = 40 * 1024**3,
+    used_bytes: int = 10 * 1024**3,
+) -> RestoreCheckResult:
+    return RestoreCheckResult(
+        name="windows_image_geometry",
+        passed=True,
+        status="PASS",
+        details={
+            "source_blocks": source_size // 4096,
+            "used_blocks": used_bytes // 4096,
+            "block_size": 4096,
+            "source_size_bytes": source_size,
+            "used_bytes": used_bytes,
+        },
+    )
 
 
 def test_apply_forbidden():
@@ -94,7 +122,8 @@ def test_dry_run_required():
 
 def test_mount_required_disables_restore():
     with patch.object(restore_planner_mod, "discover_layout", return_value=(None, _layout(mount=None))):
-        plan = build_restore_plan()
+        with patch.object(restore_planner_mod, "verify_windows_boot_manager", return_value=_bootmgr_planned()):
+            plan = build_restore_plan()
     assert plan.restore_disabled is True
     assert plan.restore_allowed is False
     assert plan.execution_allowed is False
@@ -118,9 +147,51 @@ def test_validation_failure_restore_disabled():
         with patch.object(restore_planner_mod, "discover_layout", return_value=(None, layout)):
             with patch.object(restore_planner_mod, "build_disk_metadata", return_value=wrong_disk):
                 with patch.object(Path, "exists", return_value=True):
-                    plan = build_restore_plan()
+                    with patch.object(
+                        restore_planner_mod,
+                        "verify_windows_boot_manager",
+                        return_value=_bootmgr_planned(),
+                    ):
+                        with patch.object(
+                            restore_planner_mod,
+                            "read_windows_image_geometry",
+                            return_value=_geometry_check(),
+                        ):
+                            plan = build_restore_plan()
     assert plan.restore_disabled is True
     assert plan.restore_allowed is False
+
+
+def test_device_mismatch_compatible_restore_allowed_when_target_is_large_enough():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _populate_backup(root)
+        layout = _layout(mount=str(root))
+        replacement_disk = DiskMetadata(
+            disk_guid="{99999999-9999-9999-9999-999999999999}",
+            disk_model="Replacement",
+            disk_serial="REPLACED",
+            disk_size=1_000_000_000_000,
+            windows_partition_uuid="{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}",
+            efi_partition_uuid="{bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb}",
+        )
+        with patch.object(restore_planner_mod, "discover_layout", return_value=(None, layout)):
+            with patch.object(restore_planner_mod, "build_disk_metadata", return_value=replacement_disk):
+                with patch.object(Path, "exists", return_value=True):
+                    with patch.object(
+                        restore_planner_mod,
+                        "verify_windows_boot_manager",
+                        return_value=_bootmgr_planned(),
+                    ):
+                        with patch.object(
+                            restore_planner_mod,
+                            "read_windows_image_geometry",
+                            return_value=_geometry_check(),
+                        ):
+                            plan = build_restore_plan()
+    assert plan.restore_allowed is True
+    assert plan.restore_mode == "compatible"
+    assert plan.compatible_restore is True
 
 
 def test_restore_allowed_planned_output():
@@ -140,7 +211,12 @@ def test_restore_allowed_planned_output():
                             status="PLANNED",
                         ),
                     ):
-                        plan = build_restore_plan()
+                        with patch.object(
+                            restore_planner_mod,
+                            "read_windows_image_geometry",
+                            return_value=_geometry_check(),
+                        ):
+                            plan = build_restore_plan()
     assert plan.simulation_only is True
     assert plan.execution_allowed is False
     assert plan.restore_allowed is True
@@ -165,9 +241,38 @@ def test_validation_exception_fail_closed():
             with patch.object(restore_planner_mod, "validate_restore", side_effect=RuntimeError("boom")):
                 with patch.object(restore_planner_mod, "build_disk_metadata", return_value=_disk()):
                     with patch.object(Path, "exists", return_value=True):
-                        plan = build_restore_plan()
+                        with patch.object(
+                            restore_planner_mod,
+                            "verify_windows_boot_manager",
+                            return_value=_bootmgr_planned(),
+                        ):
+                            plan = build_restore_plan()
     assert plan.restore_disabled is True
     assert "validation_exception" in plan.failure_reasons
+
+
+def test_fast_validation_mode_skips_full_hash_check():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _populate_backup(root)
+        layout = _layout(mount=str(root))
+        (root / "images/windows_backup.pcl").write_bytes(b"tampered")
+        with patch.object(restore_planner_mod, "discover_layout", return_value=(None, layout)):
+            with patch.object(restore_planner_mod, "build_disk_metadata", return_value=_disk()):
+                with patch.object(Path, "exists", return_value=True):
+                    with patch.object(
+                        restore_planner_mod,
+                        "verify_windows_boot_manager",
+                        return_value=_bootmgr_planned(),
+                    ):
+                        with patch.object(
+                            restore_planner_mod,
+                            "read_windows_image_geometry",
+                            return_value=_geometry_check(),
+                        ):
+                            plan = build_restore_plan(fast_validation=True)
+    assert plan.restore_allowed is True
+    assert plan.validation["checks"]["hashes"]["status"] == "SKIPPED"
 
 
 def test_dry_run_no_filesystem_writes():
@@ -196,7 +301,12 @@ def test_dry_run_no_filesystem_writes():
                                         status="PLANNED",
                                     ),
                                 ):
-                                    plan = build_restore_plan()
+                                    with patch.object(
+                                        restore_planner_mod,
+                                        "read_windows_image_geometry",
+                                        return_value=_geometry_check(),
+                                    ):
+                                        plan = build_restore_plan()
     assert plan.restore_allowed is True
     assert plan.execution_allowed is False
 
@@ -210,6 +320,17 @@ def test_planned_commands_format():
     assert "sgdisk --load-backup" in commands["gpt_restore"]
 
 
+def test_planned_commands_format_no_partclone_no_check():
+    root = Path("/mnt/recovery")
+    layout = _layout(mount=str(root))
+    commands = build_planned_commands(
+        layout=layout,
+        recovery_root=root,
+    )
+    assert "partclone.ntfs -r" in commands["windows_partclone_restore"]
+    assert "partclone.ntfs -C" not in commands["windows_partclone_restore"]
+
+
 def test_target_disk_mismatch():
     manifest = {
         "disk_guid": "{other}",
@@ -220,10 +341,106 @@ def test_target_disk_mismatch():
     assert result.passed is False
 
 
+def test_compatible_target_disk_rejects_smaller_disk():
+    manifest = {
+        "disk_guid": "{other}",
+        "windows_partition_uuid": "{w}",
+        "efi_partition_uuid": "{e}",
+        "disk_size": 2_000_000_000_000,
+    }
+    with patch.object(Path, "exists", return_value=True):
+        result = verify_compatible_target_disk(_layout(), manifest, _disk())
+    assert result.passed is False
+    assert "smaller" in (result.reason or "")
+
+
+def test_compatible_target_disk_rejects_legacy_small_ntfs_deficit():
+    manifest = {
+        "disk_guid": "{other}",
+        "windows_partition_uuid": "{w}",
+        "efi_partition_uuid": "{e}",
+        "disk_size": _disk().disk_size,
+    }
+    layout = _layout()
+    source_size = layout.windows.size + 1024 * 1024
+    with patch.object(Path, "exists", return_value=True):
+        with patch.object(
+            restore_planner_mod,
+            "read_windows_image_geometry",
+            return_value=_geometry_check(source_size=source_size, used_bytes=10 * 1024**3),
+        ):
+            result = verify_compatible_target_disk(
+                layout,
+                manifest,
+                _disk(),
+                recovery_root=Path("/mnt/recovery"),
+            )
+    assert result.passed is False
+    assert "target Windows partition is smaller" in (result.reason or "")
+    assert result.details["windows_target_geometry"]["details"]["legacy_used_range_unknown"] is True
+
+
+def test_windows_target_geometry_allows_exact_source_size_without_restore_margin():
+    layout = _layout()
+    source_size = layout.windows.size
+    with patch.object(
+        restore_planner_mod,
+        "read_windows_image_geometry",
+        return_value=_geometry_check(source_size=source_size, used_bytes=10 * 1024**3),
+    ):
+        result = restore_planner_mod.verify_windows_target_geometry(
+            layout,
+            Path("/mnt/recovery"),
+        )
+
+    assert result.passed is True
+    assert result.details["target_windows_size_bytes"] == source_size
+    assert result.details["restore_required_size_bytes"] == source_size
+    assert result.details["partclone_restore_margin_bytes"] == 0
+
+
+def test_compatible_target_disk_rejects_large_ntfs_deficit_without_domain_map():
+    manifest = {
+        "disk_guid": "{other}",
+        "windows_partition_uuid": "{w}",
+        "efi_partition_uuid": "{e}",
+        "disk_size": _disk().disk_size,
+    }
+    layout = _layout()
+    source_size = layout.windows.size + 2 * 1024**3
+    with patch.object(Path, "exists", return_value=True):
+        with patch.object(
+            restore_planner_mod,
+            "read_windows_image_geometry",
+            return_value=_geometry_check(source_size=source_size, used_bytes=10 * 1024**3),
+        ):
+            result = verify_compatible_target_disk(
+                layout,
+                manifest,
+                _disk(),
+                recovery_root=Path("/mnt/recovery"),
+            )
+    assert result.passed is False
+    assert "smaller" in (result.reason or "")
+
+
 def test_recovery_access_without_mount():
     result = verify_recovery_image_accessible(_layout(mount=None))
     assert result.passed is False
     assert result.status == "MOUNT_REQUIRED"
+
+
+def test_recovery_access_accepts_canonical_manifest_path():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        manifest = root / "manifests" / "recovery-manifest.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text("{}", encoding="utf-8")
+
+        result = verify_recovery_image_accessible(_layout(mount=str(root)))
+
+    assert result.passed is True
+    assert result.status == "PASS"
 
 
 def test_bootmgr_planned_when_esp_unmounted():

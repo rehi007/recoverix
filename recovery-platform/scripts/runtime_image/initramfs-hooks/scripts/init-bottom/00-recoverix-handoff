@@ -1,0 +1,120 @@
+#!/bin/sh
+# Recoverix: redirect initramfs rootmnt/init to overlay merged runtime.
+# Parent /init runs init-bottom scripts as children; export alone does not persist.
+# Write rootmnt/init to /conf/param.conf (sourced after each init-bottom script per ORDER).
+
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case $1 in
+  prereqs) prereqs; exit 0 ;;
+esac
+
+set +e
+
+mkdir -p /run/recoverix
+
+. /scripts/functions
+
+if [ ! -f /scripts/recoverix-lib ]; then
+  panic "Recoverix: recoverix-lib missing from initrd"
+fi
+. /scripts/recoverix-lib
+
+recoverix_write_param_conf() {
+  _rv_rootmnt=$1
+  _rv_init=$2
+  _rv_param=/conf/param.conf
+  _rv_tmp=/run/recoverix/param.conf.tmp
+
+  mkdir -p /conf
+  if [ -f "${_rv_param}" ]; then
+    grep -v -E '^(export[[:space:]]+)?(rootmnt|init)=' "${_rv_param}" >"${_rv_tmp}" 2>/dev/null || : >"${_rv_tmp}"
+  else
+    : >"${_rv_tmp}"
+  fi
+  {
+    printf '%s\n' "export rootmnt=\"${_rv_rootmnt}\""
+    printf '%s\n' "export init=\"${_rv_init}\""
+  } >>"${_rv_tmp}"
+  mv "${_rv_tmp}" "${_rv_param}"
+}
+
+recoverix_parse_cmdline
+recoverix_log_init
+
+if [ "$RECOVERIX_ROOT_WANTED" != 1 ]; then
+  recoverix_log_debug "handoff skipped (recoverix.root not set)"
+  exit 0
+fi
+
+recoverix_log_milestone "Recoverix handoff starting"
+
+if [ ! -f /run/recoverix/merged_root ]; then
+  recoverix_dump_overlay_failure "handoff no merged_root"
+  recoverix_fail "recoverix.root=1 but merged overlay root missing"
+fi
+
+MERGED=$(cat /run/recoverix/merged_root | tr -d '\n\r')
+recoverix_log_info "merged path=${MERGED}"
+
+if ! recoverix_mountpoint_ok "$MERGED"; then
+  recoverix_fail "merged root not mounted: ${MERGED}"
+fi
+
+if ! test -e "${MERGED}/usr/sbin/init"; then
+  recoverix_dump_overlay_failure "handoff missing init"
+  recoverix_fail "merged root missing /usr/sbin/init"
+fi
+
+INIT_REL=$(recoverix_resolve_init "$MERGED") || recoverix_fail "no init path on merged root"
+
+export rootmnt="${MERGED}"
+export init="${INIT_REL}"
+
+if [ -z "${rootmnt}" ] || { [ ! -d "${rootmnt}" ] && ! recoverix_mountpoint_ok "${rootmnt}"; }; then
+  recoverix_fail "handoff rootmnt missing or not accessible: ${rootmnt}"
+fi
+
+if ! test -e "${rootmnt}/usr/sbin/init"; then
+  recoverix_dump_overlay_failure "handoff rootmnt init guard"
+  recoverix_fail "handoff rootmnt missing ${rootmnt}/usr/sbin/init"
+fi
+
+for d in run dev proc sys; do
+  if [ ! -d "${rootmnt}/${d}" ]; then
+    mkdir -p "${rootmnt}/${d}" 2>/dev/null || true
+  fi
+  if [ ! -d "${rootmnt}/${d}" ]; then
+    recoverix_fail "handoff required dir missing: ${rootmnt}/${d}"
+  fi
+done
+
+recoverix_log_milestone "Recoverix handoff using merged root directly"
+recoverix_log_info "rootmnt=${rootmnt}"
+recoverix_log_info "init=${init}"
+
+recoverix_write_param_conf "${rootmnt}" "${init}"
+recoverix_log_milestone "Recoverix handoff wrote /conf/param.conf"
+recoverix_log_info "param rootmnt=${rootmnt}"
+recoverix_log_info "param init=${init}"
+
+echo "${rootmnt}" > /run/recoverix/merged_root
+echo "${rootmnt}" > /run/recoverix/handoff_rootmnt
+echo "${init}" > /run/recoverix/handoff_init
+
+if command -v run-init >/dev/null 2>&1; then
+  run-init -n "${rootmnt}" "${init}"
+  RI_RC=$?
+  if [ "$RI_RC" -ne 0 ]; then
+    recoverix_log_warn "run-init -n validation failed (rc=${RI_RC})"
+  else
+    recoverix_log_debug "run-init -n validation OK"
+  fi
+else
+  recoverix_log_warn "run-init not found in initrd"
+fi
+
+recoverix_log_milestone "Recoverix handoff complete (rootmnt=${rootmnt} init=${init})"
+log_begin_msg "Recoverix: boot handoff -> ${rootmnt} ${init}"
+log_end_msg 0
+exit 0

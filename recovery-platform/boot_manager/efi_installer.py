@@ -24,9 +24,9 @@ from validation.system_check import (
 
 logger = get_logger(__name__)
 
-LOG_FILE = Path(r"C:\ProgramData\RecoveryBoot\logs\efi_installer.log")
-BACKUP_ROOT = Path(r"C:\ProgramData\RecoveryBoot\backup\efi")
-PROGRAM_DATA_ROOT = Path(r"C:\ProgramData\RecoveryBoot")
+LOG_FILE = Path(r"C:\ProgramData\Recoverix\logs\efi_installer.log")
+BACKUP_ROOT = Path(r"C:\ProgramData\Recoverix\backup\efi")
+PROGRAM_DATA_ROOT = Path(r"C:\ProgramData\Recoverix")
 
 RECOVERY_EFI_RELATIVE = (
     r"EFI\RecoveryBoot\shimx64.efi",

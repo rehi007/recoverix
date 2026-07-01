@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -36,7 +37,7 @@ def mount_readonly(
 
     Default dry_run=True: logs the command without executing.
     """
-    mount_point.parent.mkdir(parents=True, exist_ok=True)
+    mount_point.mkdir(parents=True, exist_ok=True)
     command = ["mount", "-o", "ro", device_path, str(mount_point)]
     display = plan_mount(device_path, mount_point, read_only=True)
 
@@ -52,6 +53,55 @@ def mount_readonly(
     else:
         logger.error("mount failed: %s", result.stderr.strip())
     return success
+
+
+def _mounted_path_for_device(device_path: str) -> Optional[Path]:
+    """Return the active mountpoint for a device if it is already mounted."""
+    try:
+        with Path("/proc/self/mounts").open("r", encoding="utf-8") as handle:
+            for line in handle:
+                parts = line.split()
+                if len(parts) >= 2 and parts[0] == device_path:
+                    return Path(parts[1])
+    except OSError as exc:
+        logger.warning("failed to read /proc/self/mounts: %s", exc)
+    return None
+
+
+def ensure_readonly_mount(
+    device_path: str,
+    volume_mountpoint: Optional[str],
+    label: str,
+) -> Optional[Path]:
+    """
+    Return an accessible mount path for a recovery volume.
+
+    Preference order:
+    1. Existing discovered mountpoint from lsblk
+    2. Active mountpoint found in /proc/self/mounts
+    3. Read-only mount under /run/recovery-runtime/mnt/<label>
+    """
+    if volume_mountpoint:
+        mount = Path(volume_mountpoint)
+        if mount.exists():
+            return mount
+
+    mounted_path = _mounted_path_for_device(device_path)
+    if mounted_path and mounted_path.exists():
+        return mounted_path
+
+    if os.geteuid() != 0:
+        logger.info(
+            "skipping readonly mount for %s as non-root user (euid=%s)",
+            device_path,
+            os.geteuid(),
+        )
+        return None
+
+    mount_point = mount_point_for_label(label)
+    if mount_readonly(device_path, mount_point, dry_run=False):
+        return mount_point
+    return None
 
 
 def resolve_mount_path(volume_mountpoint: Optional[str], label: str) -> Optional[Path]:

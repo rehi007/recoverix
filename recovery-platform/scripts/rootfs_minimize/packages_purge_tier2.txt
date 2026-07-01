@@ -1,0 +1,55 @@
+# Tier 2 — GNOME desktop stack (run ONLY after Tier 1 + X11 minimal confirmed)
+# Requires lightdm or startx policy documented in ROOTFS_MINIMIZE.md
+# Do NOT run blindly — simulate dependencies first.
+
+gdm3
+gnome-shell
+gnome-shell-common
+gnome-shell-extension-appindicator
+gnome-shell-extension-desktop-icons-ng
+gnome-shell-extension-ubuntu-dock
+gnome-session
+gnome-session-bin
+gnome-session-common
+gnome-control-center
+gnome-control-center-faces
+gnome-settings-daemon
+gnome-settings-daemon-common
+gnome-terminal
+gnome-calculator
+gnome-calendar
+gnome-characters
+gnome-clocks
+gnome-font-viewer
+gnome-logs
+gnome-system-monitor
+gnome-text-editor
+gnome-user-docs
+gnome-user-docs-ko
+ubuntu-session
+ubuntu-docs
+yaru-theme-gtk
+yaru-theme-icon
+ubuntu-wallpapers
+ubuntu-wallpapers-jammy
+network-manager-gnome
+network-manager-openvpn-gnome
+network-manager-pptp-gnome
+
+# Large optional stacks
+speech-dispatcher
+ibus
+ibus-gtk
+ibus-gtk3
+ibus-hangul
+ibus-table
+tracker
+tracker-extract
+tracker-miner-fs
+evolution-data-server
+evolution-data-server-common
+
+# Wayland (if staying on X11 only)
+gnome-shell-wayland
+mutter
+mutter-common

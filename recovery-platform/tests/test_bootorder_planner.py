@@ -11,7 +11,7 @@ from boot_manager.bootorder_planner import (
 
 
 def _entry(identifier: str, description: str, path: str) -> BootEntry:
-    return BootEntry(identifier=identifier, description=description, path=path)
+    return BootEntry(identifier=identifier, description=description, device="partition=C:", path=path)
 
 
 def _analysis(
@@ -40,7 +40,7 @@ def test_plan_already_correct_order():
     )
     recovery = _entry(
         "{rec-id}",
-        "RecoveryBoot",
+        "Recoverix Boot Manager",
         r"\EFI\RecoveryBoot\shimx64.efi",
     )
     analysis = _analysis(
@@ -64,7 +64,7 @@ def test_plan_reorder_required():
     )
     recovery = _entry(
         "{rec-id}",
-        "RecoveryBoot",
+        "Recoverix Boot Manager",
         r"\EFI\RecoveryBoot\shimx64.efi",
     )
     analysis = _analysis(
@@ -77,7 +77,7 @@ def test_plan_reorder_required():
     assert plan.action_required is True
     assert plan.reorder_required is True
     assert plan.create_required is False
-    assert "set RecoveryBoot first" in plan.planned_actions
+    assert "set Recoverix Boot Manager first" in plan.planned_actions
     assert any("displayorder" in cmd for cmd in plan.commands)
     assert plan.target_boot_order[0] == "{rec-id}"
     assert plan.target_boot_order[1] == "{win-id}"
@@ -96,12 +96,14 @@ def test_plan_create_recovery_required():
     )
 
     plan = plan_bootorder_recovery(analysis, dry_run=True)
-    assert plan.action_required is True
+    assert plan.action_required is False
     assert plan.create_required is True
-    assert plan.reorder_required is True
-    assert "create RecoveryBoot entry" in plan.planned_actions
-    assert any("bcdedit /create" in cmd for cmd in plan.commands)
-    assert plan.target_boot_order[1] == "{win-id}"
+    assert plan.reorder_required is False
+    assert plan.status == "FAIL"
+    assert "Recoverix Boot Manager entry missing; native NVRAM writer required" in plan.planned_actions
+    assert plan.commands == []
+    assert "native UEFI NVRAM writer required" in (plan.reason or "")
+    assert plan.target_boot_order[0] == "{win-id}"
 
 
 def test_plan_missing_windows_fails():
@@ -109,7 +111,7 @@ def test_plan_missing_windows_fails():
         windows=None,
         recovery=_entry(
             "{rec-id}",
-            "RecoveryBoot",
+            "Recoverix Boot Manager",
             r"\EFI\RecoveryBoot\shimx64.efi",
         ),
         boot_order=["{rec-id}"],
@@ -129,7 +131,7 @@ def test_preserve_boot_next_in_actions():
     )
     recovery = _entry(
         "{rec-id}",
-        "RecoveryBoot",
+        "Recoverix Boot Manager",
         r"\EFI\RecoveryBoot\shimx64.efi",
     )
     analysis = _analysis(

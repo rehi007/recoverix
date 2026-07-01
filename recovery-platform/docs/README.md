@@ -114,6 +114,7 @@ F5 (또는 OEM 정의 진입키)
 | [TEST_ENTRY_CRITERIA.md](TEST_ENTRY_CRITERIA.md) | 파괴적 테스트 시작 조건 |
 | [FINAL_VALIDATION_FLOW.md](FINAL_VALIDATION_FLOW.md) | 최종 검증·QA·배포 흐름 |
 | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) | 저장소 디렉터리·책임 분리 |
+| [ROOTFS_MINIMIZE.md](ROOTFS_MINIMIZE.md) | Recovery Ubuntu rootfs chroot 경량화 (`/recovery/build/rootfs`) |
 | [PRE_DESTRUCTIVE_CHECKLIST.md](PRE_DESTRUCTIVE_CHECKLIST.md) / [MANUAL_TEST_PLAN.md](MANUAL_TEST_PLAN.md) | 수동 테스트 전 체크·플랜 |
 | [UNSUPPORTED_ENVIRONMENTS.md](UNSUPPORTED_ENVIRONMENTS.md) · [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) | 비지원·알려진 한계 |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | 장애 대응 |

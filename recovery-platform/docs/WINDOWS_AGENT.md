@@ -12,11 +12,31 @@ Windows 에이전트는 **EFI/NVRAM 관측·BootOrder 정합성 점검·(정책 
 | 진입점 | `python -m windows_agent.agent` (배포에서는 `sys.executable` 고정 권장) |
 | BootOrder | `bcdedit` 등 **읽기 우선**·repair는 **별도 apply** |
 
-## BootOrder 모니터링·drift
+## BootOrder 모니터링·repair
 
-- 부팅·주기 트리거로 **펌웨어 나열 결과·BootOrder 스냅샷**을 비교해 **drift**를 기록합니다.
+- 예약 작업은 Windows 부팅 후 1분 뒤 1회 실행하고 종료합니다.
+- 반복 실행은 하지 않습니다.
+- 실행 시 **펌웨어 나열 결과·BootOrder 스냅샷**을 비교해 **drift**를 기록합니다.
 - **dry-run(기본 계획)** 에서는 **NVRAM 수정 없음**.
 - **apply** 경로는 관리자/SYSTEM·**BitLocker OFF** 등 정책을 만족할 때만 허용합니다.
+
+## 테스트 Windows 등록
+
+관리자 권한 PowerShell 또는 CMD에서 다음 중 하나를 실행합니다.
+
+```cmd
+windows_agent\install_recoveryboot_monitor.cmd
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\windows_agent\install_recoveryboot_monitor.ps1
+```
+
+등록 확인:
+
+```cmd
+schtasks /Query /TN RecoveryBootMonitor /V /FO LIST
+```
 
 ## 금지 정책
 
