@@ -13,17 +13,19 @@ insmod ext2
 insmod gzio
 insmod chain
 insmod search
+insmod search_fs_file
 insmod search_fs_uuid
 
 menuentry "Windows Boot Manager" --id windows_boot_manager --class windows {
-    search --no-floppy --fs-uuid --set=esp @ESP_UUID@
-    set root=$esp
-    if [ -f /EFI/Microsoft/Boot/bootmgfw.efi ]; then
-        chainloader /EFI/Microsoft/Boot/bootmgfw.efi
-    else
-        echo "Windows Boot Manager not found on this ESP."
-        sleep 2
+    # F12/manual selection must continue to Windows instead of returning to the
+    # firmware boot picker. Try Windows Boot Manager directly, then fall back to
+    # firmware continuation for systems that reject EFI chainload.
+    if search --no-floppy --file --set=windows_esp /EFI/Microsoft/Boot/bootmgfw.efi; then
+        if chainloader ($windows_esp)/EFI/Microsoft/Boot/bootmgfw.efi; then
+            boot
+        fi
     fi
+    exit
 }
 
 menuentry "Recoverix Runtime" --id recoverix_runtime --class recoverix --hotkey=@RECOVERY_HOTKEY@ {

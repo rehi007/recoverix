@@ -15,7 +15,8 @@ from common.logger import get_logger
 logger = get_logger(__name__)
 
 GPT_OVERHEAD_BYTES = 1024 * 1024
-WINDOWS_BACKUP_RESERVE_RATIO = 1.20
+WINDOWS_BACKUP_SIZE_RATIO = 0.75
+WINDOWS_BACKUP_HEADROOM_BYTES = 2 * 1024**3
 
 _BYTE_RE = re.compile(r"(\d+)\s*(?:\([^)]*\))?")
 
@@ -491,7 +492,11 @@ def estimate_backup_space(layout: Any) -> BackupSizeEstimate:
         mountpoint=efi.mountpoint,
         partition_size=efi.size,
     )
-    windows_required = int(win_used * WINDOWS_BACKUP_RESERVE_RATIO) if win_used > 0 else 0
+    windows_required = (
+        int(win_used * WINDOWS_BACKUP_SIZE_RATIO) + WINDOWS_BACKUP_HEADROOM_BYTES
+        if win_used > 0
+        else 0
+    )
     required = GPT_OVERHEAD_BYTES + efi_bytes + windows_required
     required_gb = round(required / (1024**3), 2)
 
@@ -518,7 +523,8 @@ def estimate_backup_space(layout: Any) -> BackupSizeEstimate:
         "windows": win_details,
         "efi_backup_bytes": efi_bytes,
         "gpt_overhead_bytes": GPT_OVERHEAD_BYTES,
-        "windows_backup_reserve_ratio": WINDOWS_BACKUP_RESERVE_RATIO,
+        "windows_backup_size_ratio": WINDOWS_BACKUP_SIZE_RATIO,
+        "windows_backup_headroom_bytes": WINDOWS_BACKUP_HEADROOM_BYTES,
         "windows_required_bytes": windows_required,
         "recovery_image_free_bytes": free,
         "probes": probes,

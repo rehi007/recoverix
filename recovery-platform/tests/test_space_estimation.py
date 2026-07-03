@@ -99,16 +99,16 @@ class BackupSpaceAggregateTests(unittest.TestCase):
     @patch("backup_engine.space_estimation.estimate_ntfs_used_bytes")
     @patch("backup_engine.space_estimation.estimate_efi_backup_bytes", return_value=200 * 1024**2)
     def test_insufficient_recovery_image_blocks_backup(self, _efi, mock_ntfs, _free):
-        mock_ntfs.return_value = (49 * 1024**3, "ntfs_used_space", None, {"probes": []})
+        mock_ntfs.return_value = (60 * 1024**3, "ntfs_used_space", None, {"probes": []})
         est = estimate_backup_space(_layout())
         self.assertFalse(est.can_backup)
         self.assertEqual(est.reason, "insufficient recovery image space")
-        self.assertEqual(est.estimated_used_bytes, 49 * 1024**3)
+        self.assertEqual(est.estimated_used_bytes, 60 * 1024**3)
         self.assertEqual(est.estimation_method, "ntfs_used_space")
         self.assertLess(est.estimated_required_gb, 60)
         self.assertEqual(
             est.estimation_details["windows_required_bytes"],
-            int(49 * 1024**3 * 1.20),
+            int(60 * 1024**3 * 0.75) + 2 * 1024**3,
         )
 
     @patch("backup_engine.space_estimation.estimate_recovery_image_free_bytes", return_value=500 * 1024**3)

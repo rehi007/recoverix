@@ -54,7 +54,7 @@ def _current_positions(
     return recovery_pos, windows_pos
 
 
-RECOVERIX_BOOT_MANAGER_LABEL = "Recoverix Boot Manager"
+RECOVERIX_BOOT_MANAGER_LABEL = "Recoverix Hotkey Boot (복구 핫키 대기용)"
 
 
 def build_target_boot_order(

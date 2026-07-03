@@ -635,7 +635,7 @@ def test_backup_action_blocks_on_insufficient_free_space(mock_plan_run, mock_cre
             msg = actions_mod.run_backup_action(ctx, input_func=lambda _prompt: next(answers))
 
     mock_admin.assert_not_called()
-    assert "insufficient" in msg.lower()
+    assert "does not have enough free space" in msg.lower()
     assert "required" in msg.lower()
     assert "free" in msg.lower()
 

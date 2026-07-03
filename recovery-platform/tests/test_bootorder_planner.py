@@ -77,7 +77,7 @@ def test_plan_reorder_required():
     assert plan.action_required is True
     assert plan.reorder_required is True
     assert plan.create_required is False
-    assert "set Recoverix Boot Manager first" in plan.planned_actions
+    assert "set Recoverix Hotkey Boot (복구 핫키 대기용) first" in plan.planned_actions
     assert any("displayorder" in cmd for cmd in plan.commands)
     assert plan.target_boot_order[0] == "{rec-id}"
     assert plan.target_boot_order[1] == "{win-id}"
@@ -100,7 +100,7 @@ def test_plan_create_recovery_required():
     assert plan.create_required is True
     assert plan.reorder_required is False
     assert plan.status == "FAIL"
-    assert "Recoverix Boot Manager entry missing; native NVRAM writer required" in plan.planned_actions
+    assert "Recoverix Hotkey Boot (복구 핫키 대기용) entry missing; native NVRAM writer required" in plan.planned_actions
     assert plan.commands == []
     assert "native UEFI NVRAM writer required" in (plan.reason or "")
     assert plan.target_boot_order[0] == "{win-id}"

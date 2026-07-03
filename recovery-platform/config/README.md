@@ -7,6 +7,7 @@
 | 파일 | 목적 |
 |------|------|
 | `product_manifest.json` | 빌드/검증용 제품 버전·필수 문서·패키지 목록 |
+| `product_version.json` | 상용 설치파일·패치 빌드의 기본 제품/컴포넌트 버전 |
 
 빌드 스크립트(`scripts/build_release.py`)와 검증 스크립트(`scripts/validate_release.py`)는 **`product_manifest.json`** 을 참조합니다.
 

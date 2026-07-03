@@ -369,7 +369,7 @@ def test_estimate_required_bytes_uses_used_space(mock_free, mock_efi, mock_ntfs)
     mock_ntfs.return_value = (49 * 1024**3, "ntfs_used_space", None, {"probes": []})
     required = estimate_required_bytes(_layout())
     assert required < 80 * 1024**3
-    assert required > 49 * 1024**3
+    assert required > 39 * 1024**3
 
 
 @patch.object(run_backup_mod, "estimate_backup_space", return_value=_mock_estimate_ok())

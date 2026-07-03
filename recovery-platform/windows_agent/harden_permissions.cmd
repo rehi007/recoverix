@@ -22,13 +22,25 @@ if not exist "%RECOVERIX_DATA%\config" mkdir "%RECOVERIX_DATA%\config"
 
 echo Applying Recoverix permissions...
 
-icacls "%RECOVERIX_ROOT%" /inheritance:r >nul
-icacls "%RECOVERIX_ROOT%" /grant:r "SYSTEM:(OI)(CI)(F)" "Administrators:(OI)(CI)(RX)" "Users:(OI)(CI)(RX)" >nul
-icacls "%RECOVERIX_ROOT%" /setowner "SYSTEM" /T /C >nul
+set "LOG=%RECOVERIX_DATA%\logs\harden_permissions.log"
+set "FAILED=0"
 
-icacls "%RECOVERIX_DATA%" /inheritance:r >nul
-icacls "%RECOVERIX_DATA%" /grant:r "SYSTEM:(OI)(CI)(F)" "Administrators:(OI)(CI)(R)" "Users:(OI)(CI)(R)" >nul
-icacls "%RECOVERIX_DATA%" /setowner "SYSTEM" /T /C >nul
+echo [%DATE% %TIME%] Applying Recoverix permissions.>>"%LOG%"
+
+call :run icacls "%RECOVERIX_ROOT%" /inheritance:e /T /C
+call :run icacls "%RECOVERIX_ROOT%" /grant "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(RX)" /T /C
+
+call :run icacls "%RECOVERIX_DATA%" /inheritance:e /T /C
+call :run icacls "%RECOVERIX_DATA%" /grant "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(R)" /T /C
 
 echo Recoverix permissions applied.
+exit /b 0
+
+:run
+echo ^> %*>>"%LOG%"
+%* >>"%LOG%" 2>&1
+if errorlevel 1 (
+  echo WARNING: command failed with rc=%ERRORLEVEL%>>"%LOG%"
+  set "FAILED=1"
+)
 exit /b 0

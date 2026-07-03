@@ -29,9 +29,9 @@ constexpr uint8_t kMediaFilePathSubType = 0x04;
 constexpr uint8_t kEndDevicePath = 0x7f;
 constexpr uint8_t kEndEntireSubType = 0xff;
 
-const std::wstring kRecoveryDescription = L"Recoverix Boot Manager";
+const std::wstring kRecoveryDescription = L"Recoverix Hotkey Boot (복구 핫키 대기용)";
 const std::wstring kRecoveryPath = L"\\EFI\\RecoveryBoot\\shimx64.efi";
-const std::wstring kDirectRecoveryDescription = L"Start Recoverix(복구 솔루션 직접 진입)";
+const std::wstring kDirectRecoveryDescription = L"Start Recoverix (복구 모드 직접 진입)";
 const std::wstring kDirectRecoveryPath = L"\\EFI\\RecoverixDirect\\shimx64.efi";
 const std::wstring kWindowsPathNeedle = L"\\efi\\microsoft\\boot\\bootmgfw.efi";
 const std::wstring kRecoveryPathNeedle = L"\\efi\\recoveryboot\\shimx64.efi";

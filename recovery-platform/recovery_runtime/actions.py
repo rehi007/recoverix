@@ -339,9 +339,9 @@ def run_backup_action(
                     and dry_plan.recovery_image_free_bytes < dry_plan.estimated_required_bytes
                 ):
                     return (
-                        "Backup unavailable: insufficient recovery image space "
-                        f"(required {format_bytes(dry_plan.estimated_required_bytes)}, "
-                        f"free {format_bytes(dry_plan.recovery_image_free_bytes)})"
+                        "Backup unavailable: RECOVERY_IMAGE does not have enough free space "
+                        f"(estimated required {format_bytes(dry_plan.estimated_required_bytes)}, "
+                        f"available {format_bytes(dry_plan.recovery_image_free_bytes)})"
                     )
                 return f"Backup unavailable: {reason}"
 

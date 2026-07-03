@@ -14,6 +14,7 @@ get-pip.py
 
 # Generated Recoverix build and test artifacts
 recovery-platform/release/commercial/
+releases/
 recovery-platform/scripts/runtime_image/logs/
 recovery-platform/scripts/runtime_image/wget-log*
 recovery-platform/scripts/runtime_image/test.txt

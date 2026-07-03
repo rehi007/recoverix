@@ -1,0 +1,12 @@
+{
+  "product": "Recoverix",
+  "version": "T.1.0.0",
+  "windows_components_version": "T.1.0.0",
+  "recovery_runtime_version": "T.1.0.0",
+  "status_app_version": "T.1.0.0",
+  "nvram_writer_version": "T.1.0.0",
+  "publisher": "FORYOUCOM",
+  "support_phone": "1544-1879",
+  "support_email": "help@foryoucom.co.kr",
+  "language": "ko-KR"
+}
