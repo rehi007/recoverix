@@ -295,7 +295,7 @@ def copy_efi(dst: Path, recovery_linux: dict[str, object]) -> None:
     )
     build_standalone_grub(recovery_boot_config, recovery_boot_dst / "grubx64.efi")
     build_standalone_grub(direct_config, recoverix_direct_dst / "grubx64.efi")
-    build_standalone_grub(direct_config, fallback_dst / "grubx64.efi")
+    build_standalone_grub(recovery_boot_config, fallback_dst / "grubx64.efi")
 
 
 def read_recovery_uuid(runtime_root: Path) -> str:

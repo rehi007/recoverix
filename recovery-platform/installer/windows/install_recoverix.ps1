@@ -1661,6 +1661,7 @@ function Register-RecoverixBootIntegration {
         [string]$WindowsPowerShell
     )
 
+    $taskRegistered = $false
     if (-not $SkipTask) {
         $taskInstaller = Join-Path $InstallRoot "windows_agent\install_recoveryboot_monitor.ps1"
         if (Test-Path $taskInstaller) {
@@ -1670,6 +1671,7 @@ function Register-RecoverixBootIntegration {
             if ($LASTEXITCODE -ne 0) {
                 throw "RecoveryBootMonitor registration failed with rc=$LASTEXITCODE"
             }
+            $taskRegistered = $true
         }
     }
 
@@ -1677,11 +1679,31 @@ function Register-RecoverixBootIntegration {
         $writer = Join-Path $InstallRoot "native\nvram_writer\recoverix-nvram-writer.exe"
         if (Test-Path $writer) {
             Write-Step "Registering Recoverix boot entries"
-            Write-InstallLog "Running Recoverix NVRAM repair."
-            & $writer --skip-filesystem-extend
+            Write-InstallLog "Running Recoverix NVRAM repair with BootNext cleanup."
+            & $writer --skip-filesystem-extend --clear-bootnext
             if ($LASTEXITCODE -ne 0) {
                 throw "Recoverix NVRAM repair failed with rc=$LASTEXITCODE"
             }
+        }
+
+        if ($taskRegistered) {
+            Write-Step "Running RecoveryBootMonitor once"
+            Write-InstallLog "Running RecoveryBootMonitor scheduled task once after installation."
+            $taskRunOutput = & schtasks.exe /Run /TN RecoveryBootMonitor 2>&1
+            $taskRunExitCode = $LASTEXITCODE
+            foreach ($line in $taskRunOutput) {
+                Write-InstallLog "RecoveryBootMonitor immediate run: $line"
+            }
+            Write-InstallLog "RecoveryBootMonitor immediate run rc=$taskRunExitCode"
+            if ($taskRunExitCode -ne 0) {
+                throw "RecoveryBootMonitor immediate run failed with rc=$taskRunExitCode"
+            }
+            Start-Sleep -Seconds 5
+            $taskQueryOutput = & schtasks.exe /Query /TN RecoveryBootMonitor /V /FO LIST 2>&1
+            foreach ($line in $taskQueryOutput) {
+                Write-InstallLog "RecoveryBootMonitor immediate query: $line"
+            }
+            Write-InstallLog "RecoveryBootMonitor immediate query rc=$LASTEXITCODE"
         }
     }
 }

@@ -224,6 +224,30 @@ bool write_firmware_var(const std::wstring& name, const std::vector<uint8_t>& da
   return true;
 }
 
+bool delete_firmware_var_if_present(const std::wstring& name, bool dry_run) {
+  std::vector<uint8_t> existing;
+  if (!read_firmware_var(name, existing)) {
+    log_line(name + L" is not set");
+    return true;
+  }
+
+  log_line(dry_run ? L"DRY-RUN: would clear " + name : L"Clearing " + name);
+  if (dry_run) {
+    return true;
+  }
+
+  if (!SetFirmwareEnvironmentVariableExW(
+          name.c_str(),
+          kEfiGlobalGuid,
+          nullptr,
+          0,
+          0)) {
+    log_line(L"ERROR: failed to clear " + name + L": " + last_error_message());
+    return false;
+  }
+  return true;
+}
+
 std::wstring boot_var_name(uint16_t id) {
   wchar_t buf[16]{};
   std::swprintf(buf, 16, L"Boot%04X", id);
@@ -482,7 +506,7 @@ uint16_t ensure_boot_entry(
   return id;
 }
 
-int run_repair(bool dry_run) {
+int run_repair(bool dry_run, bool clear_boot_next) {
   if (!enable_system_environment_privilege()) {
     return 3;
   }
@@ -571,6 +595,10 @@ int run_repair(bool dry_run) {
     return 8;
   }
 
+  if (clear_boot_next && !delete_firmware_var_if_present(L"BootNext", dry_run)) {
+    return 9;
+  }
+
   log_line(dry_run ? L"DRY-RUN complete" : kRecoveryDescription + L" NVRAM repair complete");
   return 0;
 }
@@ -581,6 +609,7 @@ int wmain(int argc, wchar_t** argv) {
   bool dry_run = false;
   bool skip_filesystem_extend = false;
   bool filesystem_extend_only = false;
+  bool clear_boot_next = false;
   for (int i = 1; i < argc; ++i) {
     std::wstring arg = argv[i];
     if (arg == L"--dry-run") {
@@ -589,10 +618,12 @@ int wmain(int argc, wchar_t** argv) {
       skip_filesystem_extend = true;
     } else if (arg == L"--filesystem-extend-only") {
       filesystem_extend_only = true;
+    } else if (arg == L"--clear-bootnext") {
+      clear_boot_next = true;
     } else if (arg == L"--help" || arg == L"-h") {
       std::wcout
           << L"recoverix-nvram-writer.exe [--dry-run] [--skip-filesystem-extend] "
-          << L"[--filesystem-extend-only]" << std::endl;
+          << L"[--filesystem-extend-only] [--clear-bootnext]" << std::endl;
       return 0;
     }
   }
@@ -609,7 +640,7 @@ int wmain(int argc, wchar_t** argv) {
     }
   }
 
-  int repair_rc = run_repair(dry_run);
+  int repair_rc = run_repair(dry_run, clear_boot_next);
   if (repair_rc != 0) {
     return repair_rc;
   }

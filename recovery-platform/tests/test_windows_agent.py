@@ -308,6 +308,24 @@ def test_windows_monitor_installers_prefer_native_writer():
     assert "$boot.Delay = 'PT1M'" in ps1
 
 
+def test_installer_final_nvram_repair_clears_bootnext():
+    root = Path(__file__).resolve().parents[1]
+    installer = (root / "installer" / "windows" / "install_recoverix.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "--skip-filesystem-extend --clear-bootnext" in installer
+
+
+def test_installer_runs_recoveryboot_monitor_once_after_registration():
+    root = Path(__file__).resolve().parents[1]
+    installer = (root / "installer" / "windows" / "install_recoverix.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "Running RecoveryBootMonitor scheduled task once after installation." in installer
+    assert "schtasks.exe /Run /TN RecoveryBootMonitor" in installer
+    assert "Start-Sleep -Seconds 5" in installer
+
+
 def test_agent_calls_native_writer_when_recoveryboot_missing():
     analysis = _analysis(recovery=False, windows=True)
     plan = plan_bootorder_recovery(analysis, dry_run=False)
